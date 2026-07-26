@@ -5,7 +5,7 @@
 
 use chrono::{Local, NaiveDate};
 
-use crate::parser::{DataElement, DEG};
+use crate::parser::{DEG, DataElement};
 use crate::types::*;
 
 // ---- KTI (Kontoverbindung International) ----
@@ -477,6 +477,33 @@ pub(crate) fn hksal(
     degs
 }
 
+pub(crate) fn hksal_national(
+    segment_number: u16,
+    version: u16,
+    account_number: &str,
+    sub_account: &str,
+    blz: &str,
+    touchdown: Option<&str>,
+) -> Vec<DEG> {
+    let mut degs = vec![
+        seg_header("HKSAL", segment_number, version),
+        deg(vec![
+            de_text(account_number),
+            de_text(sub_account),
+            de_text("280"),
+            de_text(blz),
+        ]),
+        deg1(de_text("N")),
+        deg1(de_empty()),
+    ];
+
+    if let Some(td) = touchdown {
+        degs.push(deg1(de_text(td)));
+    }
+
+    degs
+}
+
 // ---- HKKAZ (Kontoumsätze anfordern) - Statement Request (MT940), version 5-7 ----
 
 pub(crate) fn hkkaz(
@@ -644,6 +671,14 @@ mod tests {
         let bytes = serialize_segment(&degs).unwrap();
         let wire = String::from_utf8(bytes).unwrap();
         assert_eq!(wire, "HKSAL:3:7+DE04120300001084174299:BYLADEM1001+N'");
+    }
+
+    #[test]
+    fn hksal_v6_national_wire_format() {
+        let degs = hksal_national(3, 6, "1234567890", "01", "12030000", Some("TD1"));
+        let bytes = serialize_segment(&degs).unwrap();
+        let wire = String::from_utf8(bytes).unwrap();
+        assert_eq!(wire, "HKSAL:3:6+1234567890:01:280:12030000+N++TD1'");
     }
 
     #[test]

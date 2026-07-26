@@ -46,7 +46,7 @@ use chrono::NaiveDate;
 
 use crate::error::{FinTSError, Result};
 use crate::message;
-use crate::parser::{self, RawSegment, DEG};
+use crate::parser::{self, DEG, RawSegment};
 use crate::segments::response::*;
 use crate::transport::FinTSConnection;
 use crate::types::*;
@@ -95,6 +95,8 @@ pub(crate) enum Segment {
     SepaAccounts,
     /// HKSAL: Saldenabfrage (balance request)
     Balance { account: Account },
+    /// HKSAL with national account identity for non-IBAN HIUPD accounts.
+    NationalBalance { account: NationalAccount },
     /// HKKAZ: Kontoumsätze (transaction request)
     Transactions {
         account: Account,
@@ -157,6 +159,17 @@ impl Segment {
             Segment::Balance { account } => {
                 let version = params.supported_version("HISALS", 7).max(5);
                 hksal(0, version, account.iban(), account.bic(), None)
+            }
+            Segment::NationalBalance { account } => {
+                let version = params.supported_version("HISALS", 6).clamp(5, 6);
+                hksal_national(
+                    0,
+                    version,
+                    &account.account_number,
+                    &account.sub_account,
+                    account.blz.as_str(),
+                    None,
+                )
             }
             Segment::Transactions {
                 account,
@@ -374,7 +387,7 @@ impl Response {
                     return Err(FinTSError::BankError {
                         kind: code.kind.clone(),
                         message: code.text.clone(),
-                    })
+                    });
                 }
                 _ => {}
             }
@@ -1123,6 +1136,48 @@ impl Dialog<Open> {
         response.check_errors()?;
 
         // Parse HISAL
+        if let Some(hisal) = response.find_segment("HISAL") {
+            if let Some(balance) = parse_hisal(hisal) {
+                return Ok(BalanceResult::Success(balance));
+            }
+        }
+
+        Ok(BalanceResult::Empty)
+    }
+
+    /// Request account balance (HKSAL) for a national non-IBAN account.
+    pub async fn national_balance(&mut self, account: &NationalAccount) -> Result<BalanceResult> {
+        let hksal = SegmentType::new("HKSAL");
+        let needs_tan = self.params.needs_tan(&hksal);
+        let mut segments = vec![Segment::NationalBalance {
+            account: account.clone(),
+        }];
+        if needs_tan {
+            info!("[FinTS] national_balance: HKSAL + HKTAN:4 (HIPINS: TAN required)");
+            segments.push(Segment::TanProcess4 {
+                reference_seg: SegmentRef::new("HKSAL"),
+                tan_medium: self.params.selected_tan_medium.clone(),
+            });
+        } else {
+            info!("[FinTS] national_balance: HKSAL (HIPINS: PIN-only)");
+        }
+
+        let response = self.send_segments(&segments).await?;
+
+        for c in response.all_codes() {
+            if c.is_error() || c.is_warning() {
+                info!("[FinTS] HKSAL national: {} - {}", c.code(), c.text);
+            }
+        }
+
+        if response.needs_tan() && !response.has_sca_exemption() {
+            if let Some(challenge) = response.get_tan_challenge() {
+                return Ok(BalanceResult::NeedTan(challenge));
+            }
+        }
+
+        response.check_errors()?;
+
         if let Some(hisal) = response.find_segment("HISAL") {
             if let Some(balance) = parse_hisal(hisal) {
                 return Ok(BalanceResult::Success(balance));
