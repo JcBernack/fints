@@ -523,6 +523,37 @@ pub(crate) fn hkkaz(
     degs
 }
 
+pub(crate) fn hkkaz_national(
+    segment_number: u16,
+    version: u16,
+    account_number: &str,
+    sub_account: &str,
+    blz: &str,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+    touchdown: Option<&str>,
+) -> Vec<DEG> {
+    let mut degs = vec![
+        seg_header("HKKAZ", segment_number, version),
+        deg(vec![
+            de_text(account_number),
+            de_text(sub_account),
+            de_text("280"),
+            de_text(blz),
+        ]),
+        deg1(de_text("N")),
+        deg1(de_date(start_date)),
+        deg1(de_date(end_date)),
+        deg1(de_empty()),
+    ];
+
+    if let Some(td) = touchdown {
+        degs.push(deg1(de_text(td)));
+    }
+
+    degs
+}
+
 // ---- HKWPD (Wertpapierdepotaufstellung) - Securities Holdings Request, version 1-7 ----
 
 /// Build HKWPD to request the securities depot listing for a SEPA account.
@@ -633,6 +664,28 @@ mod tests {
         assert_eq!(
             wire,
             "HKKAZ:3:7+DE04120300001084174299:BYLADEM1001+N+20250329+20260329'"
+        );
+    }
+
+    #[test]
+    fn hkkaz_v6_national_wire_format() {
+        let start = chrono::NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
+        let end = chrono::NaiveDate::from_ymd_opt(2026, 7, 26).unwrap();
+        let degs = hkkaz_national(
+            3,
+            6,
+            "1234567890",
+            "01",
+            "12030000",
+            start,
+            end,
+            Some("TD1"),
+        );
+        let bytes = serialize_segment(&degs).unwrap();
+        let wire = String::from_utf8(bytes).unwrap();
+        assert_eq!(
+            wire,
+            "HKKAZ:3:6+1234567890:01:280:12030000+N+20260701+20260726++TD1'"
         );
     }
 

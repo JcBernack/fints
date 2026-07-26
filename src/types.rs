@@ -568,6 +568,57 @@ pub struct SepaAccount {
     pub currency: Option<Currency>,
 }
 
+/// Account info as returned by HIUPD, including non-SEPA/card accounts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdAccount {
+    pub account_number: String,
+    pub sub_account: String,
+    pub blz: Blz,
+    pub iban: Option<Iban>,
+    pub bic: Option<Bic>,
+    pub owner: Option<String>,
+    pub product_name: Option<String>,
+    pub currency: Option<Currency>,
+    pub supported_operations: Vec<SegmentType>,
+}
+
+impl UpdAccount {
+    pub fn as_sepa_account(&self) -> Option<SepaAccount> {
+        Some(SepaAccount {
+            iban: self.iban.clone()?,
+            bic: self.bic.clone()?,
+            account_number: self.account_number.clone(),
+            sub_account: self.sub_account.clone(),
+            blz: self.blz.clone(),
+            owner: self.owner.clone(),
+            product_name: self.product_name.clone(),
+            currency: self.currency.clone(),
+        })
+    }
+}
+
+/// National FinTS account identifier used by account operations that do not use IBAN/BIC.
+#[derive(Debug, Clone)]
+pub struct NationalAccount {
+    pub account_number: String,
+    pub sub_account: String,
+    pub blz: Blz,
+}
+
+impl NationalAccount {
+    pub fn new(
+        account_number: impl Into<String>,
+        sub_account: impl Into<String>,
+        blz: Blz,
+    ) -> Self {
+        Self {
+            account_number: account_number.into(),
+            sub_account: sub_account.into(),
+            blz,
+        }
+    }
+}
+
 /// Account balance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountBalance {

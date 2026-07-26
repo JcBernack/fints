@@ -220,7 +220,7 @@ pub(crate) fn parse_hispa(seg: &RawSegment) -> Vec<SepaAccount> {
 }
 
 /// Parse HIUPD (User Parameter Data) for account info including owner/product name.
-pub(crate) fn parse_hiupd(seg: &RawSegment) -> Option<SepaAccount> {
+pub(crate) fn parse_hiupd(seg: &RawSegment) -> Option<UpdAccount> {
     // HIUPD: DEG1=header, DEG2=account(KTO), DEG3=customer_id, DEG4=upd_usage, DEG5=account_type?,
     //        DEG6=currency?, DEG7=owner_name1, DEG8=owner_name2?, DEG9=product_name?
     if seg.deg_count() < 3 {
@@ -250,16 +250,38 @@ pub(crate) fn parse_hiupd(seg: &RawSegment) -> Option<SepaAccount> {
     let product_name = read_opt_str(seg, 8, 0).or_else(|| read_opt_str(seg, 9, 0));
     let currency = read_opt_str(seg, 5, 0);
 
-    Some(SepaAccount {
-        iban: Iban::new(iban),
-        bic: Bic::new(bic),
+    Some(UpdAccount {
+        iban: (!iban.is_empty()).then(|| Iban::new(iban)),
+        bic: (!bic.is_empty()).then(|| Bic::new(bic)),
         account_number,
         sub_account,
         blz: Blz::new(blz),
         owner,
         product_name,
         currency: currency.map(Currency::new),
+        supported_operations: parse_hiupd_supported_operations(seg),
     })
+}
+
+fn parse_hiupd_supported_operations(seg: &RawSegment) -> Vec<SegmentType> {
+    let mut operations = Vec::new();
+
+    for i in 1..seg.deg_count() {
+        let operation = seg.deg(i).get_str(0);
+        if is_operation_code(&operation)
+            && !operations
+                .iter()
+                .any(|existing: &SegmentType| existing.as_str() == operation)
+        {
+            operations.push(SegmentType::new(operation));
+        }
+    }
+
+    operations
+}
+
+fn is_operation_code(value: &str) -> bool {
+    value.len() == 5 && value.chars().all(|ch| ch.is_ascii_uppercase())
 }
 
 /// Parse HISAL (balance response).

@@ -78,9 +78,17 @@ pub struct TanPending;
 #[derive(Debug, Clone)]
 pub(crate) enum Segment {
     /// HKIDN: Identifikation (dialog init)
-    Identify { blz: Blz, user_id: UserId, system_id: SystemId },
+    Identify {
+        blz: Blz,
+        user_id: UserId,
+        system_id: SystemId,
+    },
     /// HKVVB: Verarbeitungsvorbereitung
-    ProcessPrep { bpd_version: u16, upd_version: u16, product_id: ProductId },
+    ProcessPrep {
+        bpd_version: u16,
+        upd_version: u16,
+        product_id: ProductId,
+    },
     /// HKSYN: Synchronisierung (get system_id)
     Sync,
     /// HKSPA: SEPA-Kontoverbindung anfordern (account list request)
@@ -94,6 +102,13 @@ pub(crate) enum Segment {
         end_date: NaiveDate,
         touchdown: Option<TouchdownPoint>,
     },
+    /// HKKAZ with national account identity for non-IBAN HIUPD accounts.
+    NationalTransactions {
+        account: NationalAccount,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        touchdown: Option<TouchdownPoint>,
+    },
     /// HKWPD: Wertpapierdepotaufstellung (securities holdings request)
     Holdings {
         account: Account,
@@ -101,11 +116,20 @@ pub(crate) enum Segment {
         touchdown: Option<TouchdownPoint>,
     },
     /// HKTAN process 4: initiate TAN for a referenced segment
-    TanProcess4 { reference_seg: SegmentRef, tan_medium: Option<TanMediumName> },
+    TanProcess4 {
+        reference_seg: SegmentRef,
+        tan_medium: Option<TanMediumName>,
+    },
     /// HKTAN process S: poll decoupled TAN status
-    TanPollDecoupled { task_reference: TaskReference, tan_medium: Option<TanMediumName> },
+    TanPollDecoupled {
+        task_reference: TaskReference,
+        tan_medium: Option<TanMediumName>,
+    },
     /// HKTAN process 2: submit TAN response
-    TanProcess2 { task_reference: TaskReference, tan_medium: Option<TanMediumName> },
+    TanProcess2 {
+        task_reference: TaskReference,
+        tan_medium: Option<TanMediumName>,
+    },
     /// HKEND: dialog end
     End { dialog_id: DialogId },
 }
@@ -115,15 +139,17 @@ impl Segment {
     pub(crate) fn to_degs(&self, params: &BankParams) -> Vec<DEG> {
         use crate::segments::builder::*;
         match self {
-            Segment::Identify { blz, user_id, system_id } => {
-                hkidn(0, blz.as_str(), user_id.as_str(), system_id.as_str())
-            }
-            Segment::ProcessPrep { bpd_version, upd_version, product_id } => {
-                hkvvb(0, *bpd_version, *upd_version, product_id.as_str())
-            }
-            Segment::Sync => {
-                hksyn(0)
-            }
+            Segment::Identify {
+                blz,
+                user_id,
+                system_id,
+            } => hkidn(0, blz.as_str(), user_id.as_str(), system_id.as_str()),
+            Segment::ProcessPrep {
+                bpd_version,
+                upd_version,
+                product_id,
+            } => hkvvb(0, *bpd_version, *upd_version, product_id.as_str()),
+            Segment::Sync => hksyn(0),
             Segment::SepaAccounts => {
                 let version = params.supported_version("HISPAS", 3).max(1);
                 hkspa(0, version)
@@ -132,29 +158,93 @@ impl Segment {
                 let version = params.supported_version("HISALS", 7).max(5);
                 hksal(0, version, account.iban(), account.bic(), None)
             }
-            Segment::Transactions { account, start_date, end_date, touchdown } => {
+            Segment::Transactions {
+                account,
+                start_date,
+                end_date,
+                touchdown,
+            } => {
                 let version = params.supported_version("HIKAZS", 7).max(5);
-                hkkaz(0, version, account.iban(), account.bic(), *start_date, *end_date, touchdown.as_ref().map(|t| t.as_str()))
+                hkkaz(
+                    0,
+                    version,
+                    account.iban(),
+                    account.bic(),
+                    *start_date,
+                    *end_date,
+                    touchdown.as_ref().map(|t| t.as_str()),
+                )
             }
-            Segment::Holdings { account, currency, touchdown } => {
+            Segment::NationalTransactions {
+                account,
+                start_date,
+                end_date,
+                touchdown,
+            } => {
+                let version = params.supported_version("HIKAZS", 6).clamp(5, 6);
+                hkkaz_national(
+                    0,
+                    version,
+                    &account.account_number,
+                    &account.sub_account,
+                    account.blz.as_str(),
+                    *start_date,
+                    *end_date,
+                    touchdown.as_ref().map(|t| t.as_str()),
+                )
+            }
+            Segment::Holdings {
+                account,
+                currency,
+                touchdown,
+            } => {
                 let version = params.supported_version("HIWPDS", 7).max(1);
-                hkwpd(0, version, account.iban(), account.bic(), currency.as_ref().map(|c| c.as_str()), touchdown.as_ref().map(|t| t.as_str()))
+                hkwpd(
+                    0,
+                    version,
+                    account.iban(),
+                    account.bic(),
+                    currency.as_ref().map(|c| c.as_str()),
+                    touchdown.as_ref().map(|t| t.as_str()),
+                )
             }
-            Segment::TanProcess4 { reference_seg, tan_medium } => {
+            Segment::TanProcess4 {
+                reference_seg,
+                tan_medium,
+            } => {
                 let version = params.hktan_version();
-                hktan_process4(0, version, reference_seg.as_str(), tan_medium.as_ref().map(|t| t.as_str()))
+                hktan_process4(
+                    0,
+                    version,
+                    reference_seg.as_str(),
+                    tan_medium.as_ref().map(|t| t.as_str()),
+                )
             }
-            Segment::TanPollDecoupled { task_reference, tan_medium } => {
+            Segment::TanPollDecoupled {
+                task_reference,
+                tan_medium,
+            } => {
                 let version = params.hktan_version();
-                hktan_process_s(0, version, task_reference.as_str(), tan_medium.as_ref().map(|t| t.as_str()))
+                hktan_process_s(
+                    0,
+                    version,
+                    task_reference.as_str(),
+                    tan_medium.as_ref().map(|t| t.as_str()),
+                )
             }
-            Segment::TanProcess2 { task_reference, tan_medium } => {
+            Segment::TanProcess2 {
+                task_reference,
+                tan_medium,
+            } => {
                 let version = params.hktan_version();
-                hktan_process2(0, version, task_reference.as_str(), tan_medium.as_ref().map(|t| t.as_str()))
+                hktan_process2(
+                    0,
+                    version,
+                    task_reference.as_str(),
+                    tan_medium.as_ref().map(|t| t.as_str()),
+                )
             }
-            Segment::End { dialog_id } => {
-                hkend(0, dialog_id.as_str())
-            }
+            Segment::End { dialog_id } => hkend(0, dialog_id.as_str()),
         }
     }
 }
@@ -216,7 +306,10 @@ pub struct Response {
 
 impl Response {
     pub fn find_segments(&self, seg_type: &str) -> Vec<&RawSegment> {
-        self.segments.iter().filter(|s| s.segment_type() == seg_type).collect()
+        self.segments
+            .iter()
+            .filter(|s| s.segment_type() == seg_type)
+            .collect()
     }
 
     pub fn find_segment(&self, seg_type: &str) -> Option<&RawSegment> {
@@ -229,7 +322,8 @@ impl Response {
 
     /// 0030 = order received, TAN required.
     pub fn needs_tan(&self) -> bool {
-        self.all_codes().any(|c| c.is_tan_required() || c.is_decoupled())
+        self.all_codes()
+            .any(|c| c.is_tan_required() || c.is_decoupled())
     }
 
     /// 3955 = decoupled TAN (pushTAN initiated).
@@ -244,14 +338,14 @@ impl Response {
 
     /// 3076 = no strong authentication required (SCA exemption).
     pub fn has_sca_exemption(&self) -> bool {
-        self.all_codes().any(|c| c.kind == ResponseCodeKind::ScaExemption)
+        self.all_codes()
+            .any(|c| c.kind == ResponseCodeKind::ScaExemption)
     }
 
     /// 3040 = more data available (touchdown/pagination).
     /// Returns the touchdown point if found.
     pub fn touchdown(&self) -> Option<TouchdownPoint> {
-        find_touchdown(&self.segment_codes)
-            .or_else(|| find_touchdown(&self.global_codes))
+        find_touchdown(&self.segment_codes).or_else(|| find_touchdown(&self.global_codes))
     }
 
     /// Extract HITAN challenge from response.
@@ -276,10 +370,12 @@ impl Response {
             match &code.kind {
                 ResponseCodeKind::PinWrong => return Err(FinTSError::PinWrong),
                 ResponseCodeKind::AccountLocked => return Err(FinTSError::AccountLocked),
-                k if k.is_error() => return Err(FinTSError::BankError {
-                    kind: code.kind.clone(),
-                    message: code.text.clone(),
-                }),
+                k if k.is_error() => {
+                    return Err(FinTSError::BankError {
+                        kind: code.kind.clone(),
+                        message: code.text.clone(),
+                    })
+                }
                 _ => {}
             }
         }
@@ -321,6 +417,7 @@ pub struct BankParams {
     pub tan_methods: Vec<TanMethod>,
     pub selected_security_function: SecurityFunction,
     pub selected_tan_medium: Option<TanMediumName>,
+    pub accounts_from_hiupd: Vec<UpdAccount>,
     pub accounts_from_upd: Vec<SepaAccount>,
     pub operation_tan_required: HashMap<SegmentType, bool>,
     pub allowed_security_functions: Vec<SecurityFunction>,
@@ -330,11 +427,14 @@ pub struct BankParams {
 impl BankParams {
     pub fn new() -> Self {
         Self {
-            bpd_version: 0, upd_version: 0,
-            bpd_segments: Vec::new(), upd_segments: Vec::new(),
+            bpd_version: 0,
+            upd_version: 0,
+            bpd_segments: Vec::new(),
+            upd_segments: Vec::new(),
             tan_methods: Vec::new(),
             selected_security_function: SecurityFunction::pin_only(),
             selected_tan_medium: None,
+            accounts_from_hiupd: Vec::new(),
             accounts_from_upd: Vec::new(),
             operation_tan_required: HashMap::new(),
             allowed_security_functions: Vec::new(),
@@ -360,7 +460,10 @@ impl BankParams {
                 "HIUPD" => {
                     self.upd_segments.push(seg.clone());
                     if let Some(acc) = parse_hiupd(seg) {
-                        self.accounts_from_upd.push(acc);
+                        if let Some(sepa_account) = acc.as_sepa_account() {
+                            self.accounts_from_upd.push(sepa_account);
+                        }
+                        self.accounts_from_hiupd.push(acc);
                     }
                 }
                 "HISYN" => {
@@ -385,12 +488,16 @@ impl BankParams {
 
     /// Does the given operation require TAN (per HIPINS)? Default: true (safe).
     pub fn needs_tan(&self, segment_type: &SegmentType) -> bool {
-        self.operation_tan_required.get(segment_type).copied().unwrap_or(true)
+        self.operation_tan_required
+            .get(segment_type)
+            .copied()
+            .unwrap_or(true)
     }
 
     /// HKTAN version for the selected TAN method.
     pub fn hktan_version(&self) -> u16 {
-        self.tan_methods.iter()
+        self.tan_methods
+            .iter()
             .find(|m| m.security_function == self.selected_security_function)
             .map(|m| m.hktan_version)
             .unwrap_or(7)
@@ -400,15 +507,19 @@ impl BankParams {
     pub fn supported_version(&self, param_segment_type: &str, max_version: u16) -> u16 {
         let v = find_highest_segment_version(&self.bpd_segments, param_segment_type, max_version);
         let result = if v == 0 { max_version } else { v };
-        info!("[FinTS] BPD lookup: {} → found v{} (BPD has v{}, max={})",
-            param_segment_type, result, v, max_version);
+        info!(
+            "[FinTS] BPD lookup: {} → found v{} (BPD has v{}, max={})",
+            param_segment_type, result, v, max_version
+        );
         result
     }
 
     /// Select the best security function from 3920 allowed list.
     pub fn select_security_function(&mut self) {
         let allowed = &self.allowed_security_functions;
-        if allowed.is_empty() { return; }
+        if allowed.is_empty() {
+            return;
+        }
 
         if let Some(ref pref) = self.preferred_security_function {
             if allowed.contains(pref) {
@@ -419,10 +530,13 @@ impl BankParams {
 
         let pin_only = SecurityFunction::pin_only();
         let methods = &self.tan_methods;
-        let chosen = allowed.iter()
+        let chosen = allowed
+            .iter()
             .filter(|sf| *sf != &pin_only)
             .max_by_key(|sf| {
-                methods.iter().find(|m| &m.security_function == *sf)
+                methods
+                    .iter()
+                    .find(|m| &m.security_function == *sf)
                     .map(|m| if m.is_decoupled { 2i32 } else { 1 })
                     .unwrap_or(0)
             });
@@ -434,26 +548,41 @@ impl BankParams {
     }
 
     pub fn is_decoupled(&self) -> bool {
-        self.tan_methods.iter()
+        self.tan_methods
+            .iter()
             .find(|m| m.security_function == self.selected_security_function)
             .map(|m| m.is_decoupled)
             .unwrap_or(false)
     }
 
     pub fn needs_tan_medium(&self) -> bool {
-        self.tan_methods.iter()
+        self.tan_methods
+            .iter()
             .find(|m| m.security_function == self.selected_security_function)
             .map(|m| m.needs_tan_medium)
             .unwrap_or(false)
     }
 
     pub fn decoupled_params(&self) -> (u64, u64, u32) {
-        self.tan_methods.iter()
+        self.tan_methods
+            .iter()
             .find(|m| m.security_function == self.selected_security_function)
             .map(|m| {
-                let first = if m.wait_before_first_poll > 0 { m.wait_before_first_poll as u64 } else { 5 };
-                let next = if m.wait_before_next_poll > 0 { m.wait_before_next_poll as u64 } else { 5 };
-                let max = if m.decoupled_max_polls > 0 { m.decoupled_max_polls as u32 } else { 20 };
+                let first = if m.wait_before_first_poll > 0 {
+                    m.wait_before_first_poll as u64
+                } else {
+                    5
+                };
+                let next = if m.wait_before_next_poll > 0 {
+                    m.wait_before_next_poll as u64
+                } else {
+                    5
+                };
+                let max = if m.decoupled_max_polls > 0 {
+                    m.decoupled_max_polls as u32
+                } else {
+                    20
+                };
                 (first, next, max)
             })
             .unwrap_or((5, 5, 20))
@@ -495,9 +624,15 @@ impl<S: std::fmt::Debug> std::fmt::Debug for Dialog<S> {
 // ── Shared internals (all states) ───────────────────────────────────────────
 
 impl<S: std::fmt::Debug> Dialog<S> {
-    pub fn system_id(&self) -> &SystemId { &self.system_id }
-    pub fn bank_params(&self) -> &BankParams { &self.params }
-    pub fn bank_params_mut(&mut self) -> &mut BankParams { &mut self.params }
+    pub fn system_id(&self) -> &SystemId {
+        &self.system_id
+    }
+    pub fn bank_params(&self) -> &BankParams {
+        &self.params
+    }
+    pub fn bank_params_mut(&mut self) -> &mut BankParams {
+        &mut self.params
+    }
 
     /// Build the standard HKIDN segment for this dialog.
     fn identify_segment(&self) -> Segment {
@@ -520,15 +655,24 @@ impl<S: std::fmt::Debug> Dialog<S> {
     /// Send typed segments with PIN but no TAN.
     async fn send_segments(&mut self, segments: &[Segment]) -> Result<Response> {
         let msg_bytes = message::build_message_from_typed(
-            &self.dialog_id, self.message_number,
-            &self.blz, &self.user_id, &self.system_id, &self.pin,
+            &self.dialog_id,
+            self.message_number,
+            &self.blz,
+            &self.user_id,
+            &self.system_id,
+            &self.pin,
             &self.params.selected_security_function,
-            segments, &self.params,
+            segments,
+            &self.params,
         )?;
 
         let msg_str = String::from_utf8_lossy(&msg_bytes);
         let redacted = msg_str.replace(self.pin.as_str(), "***PIN***");
-        info!("[FinTS] Outgoing ({} bytes): {}", msg_bytes.len(), &redacted[..redacted.len().min(500)]);
+        info!(
+            "[FinTS] Outgoing ({} bytes): {}",
+            msg_bytes.len(),
+            &redacted[..redacted.len().min(500)]
+        );
 
         self.message_number += 1;
         let response_bytes = self.connection.send(&msg_bytes).await?;
@@ -536,12 +680,22 @@ impl<S: std::fmt::Debug> Dialog<S> {
     }
 
     /// Send typed segments with an explicit TAN value in HNSHA.
-    async fn send_segments_with_tan(&mut self, segments: &[Segment], tan: &str) -> Result<Response> {
+    async fn send_segments_with_tan(
+        &mut self,
+        segments: &[Segment],
+        tan: &str,
+    ) -> Result<Response> {
         let msg_bytes = message::build_message_from_typed_with_tan(
-            &self.dialog_id, self.message_number,
-            &self.blz, &self.user_id, &self.system_id, &self.pin,
-            tan, &self.params.selected_security_function,
-            segments, &self.params,
+            &self.dialog_id,
+            self.message_number,
+            &self.blz,
+            &self.user_id,
+            &self.system_id,
+            &self.pin,
+            tan,
+            &self.params.selected_security_function,
+            segments,
+            &self.params,
         )?;
         self.message_number += 1;
         let response_bytes = self.connection.send(&msg_bytes).await?;
@@ -549,11 +703,17 @@ impl<S: std::fmt::Debug> Dialog<S> {
     }
 
     async fn send_end(&mut self) -> Result<()> {
-        if !self.dialog_id.is_assigned() { return Ok(()); }
+        if !self.dialog_id.is_assigned() {
+            return Ok(());
+        }
         debug!("Ending dialog {}", self.dialog_id);
         let msg_bytes = message::build_end_message(
-            &self.dialog_id, self.message_number,
-            &self.blz, &self.user_id, &self.system_id, &self.pin,
+            &self.dialog_id,
+            self.message_number,
+            &self.blz,
+            &self.user_id,
+            &self.system_id,
+            &self.pin,
             &self.params.selected_security_function,
             &self.params,
         )?;
@@ -574,10 +734,16 @@ impl<S: std::fmt::Debug> Dialog<S> {
 
     fn transition<T: std::fmt::Debug>(self) -> Dialog<T> {
         Dialog {
-            connection: self.connection, blz: self.blz, user_id: self.user_id,
-            pin: self.pin, system_id: self.system_id, product_id: self.product_id,
-            dialog_id: self.dialog_id, message_number: self.message_number,
-            params: self.params, _state: PhantomData,
+            connection: self.connection,
+            blz: self.blz,
+            user_id: self.user_id,
+            pin: self.pin,
+            system_id: self.system_id,
+            product_id: self.product_id,
+            dialog_id: self.dialog_id,
+            message_number: self.message_number,
+            params: self.params,
+            _state: PhantomData,
         }
     }
 }
@@ -585,27 +751,40 @@ impl<S: std::fmt::Debug> Dialog<S> {
 // ── Dialog<New> ─────────────────────────────────────────────────────────────
 
 impl Dialog<New> {
-    pub fn new(url: &str, blz: &Blz, user_id: &UserId, pin: &Pin, product_id: &ProductId) -> Result<Self> {
+    pub fn new(
+        url: &str,
+        blz: &Blz,
+        user_id: &UserId,
+        pin: &Pin,
+        product_id: &ProductId,
+    ) -> Result<Self> {
         Ok(Self {
             connection: FinTSConnection::new(url)?,
-            blz: blz.clone(), user_id: user_id.clone(),
-            pin: pin.clone(), system_id: SystemId::unassigned(),
+            blz: blz.clone(),
+            user_id: user_id.clone(),
+            pin: pin.clone(),
+            system_id: SystemId::unassigned(),
             product_id: product_id.clone(),
-            dialog_id: DialogId::unassigned(), message_number: 1,
-            params: BankParams::new(), _state: PhantomData,
+            dialog_id: DialogId::unassigned(),
+            message_number: 1,
+            params: BankParams::new(),
+            _state: PhantomData,
         })
     }
 
     pub fn with_system_id(mut self, system_id: &SystemId) -> Self {
-        self.system_id = system_id.clone(); self
+        self.system_id = system_id.clone();
+        self
     }
 
     pub fn with_params(mut self, params: &BankParams) -> Self {
-        self.params = params.clone(); self
+        self.params = params.clone();
+        self
     }
 
     pub fn with_tan_medium(mut self, medium: &TanMediumName) -> Self {
-        self.params.selected_tan_medium = Some(medium.clone()); self
+        self.params.selected_tan_medium = Some(medium.clone());
+        self
     }
 
     /// Synchronization dialog (spec: Initialisierung mit Synchronisierung).
@@ -614,7 +793,10 @@ impl Dialog<New> {
     /// The bank responds with BPD, UPD, HITANS, HIPINS, and HISYN(system_id).
     /// This dialog is ONLY for synchronization — no business segments allowed.
     pub async fn sync(mut self) -> Result<(Dialog<Synced>, Response)> {
-        info!("[FinTS] Sync dialog: BLZ={} user={} system_id={}", self.blz, self.user_id, self.system_id);
+        info!(
+            "[FinTS] Sync dialog: BLZ={} user={} system_id={}",
+            self.blz, self.user_id, self.system_id
+        );
 
         let segments = [
             self.identify_segment(),
@@ -633,12 +815,23 @@ impl Dialog<New> {
         }
 
         // Log all BPD parameter segments for diagnostics
-        let bpd_summary: Vec<String> = self.params.bpd_segments.iter()
+        let bpd_summary: Vec<String> = self
+            .params
+            .bpd_segments
+            .iter()
             .map(|s| format!("{}:v{}", s.segment_type(), s.segment_version()))
             .collect();
-        info!("[FinTS] Sync complete: BPD v{}, {} TAN methods, system_id={}",
-            self.params.bpd_version, self.params.tan_methods.len(), self.system_id);
-        info!("[FinTS] BPD segments ({}): {}", bpd_summary.len(), bpd_summary.join(", "));
+        info!(
+            "[FinTS] Sync complete: BPD v{}, {} TAN methods, system_id={}",
+            self.params.bpd_version,
+            self.params.tan_methods.len(),
+            self.system_id
+        );
+        info!(
+            "[FinTS] BPD segments ({}): {}",
+            bpd_summary.len(),
+            bpd_summary.join(", ")
+        );
 
         Ok((self.transition(), response))
     }
@@ -650,12 +843,18 @@ impl Dialog<New> {
     /// based on the bank's response codes.
     pub async fn init(mut self) -> Result<InitResult> {
         let medium = self.params.selected_tan_medium.clone();
-        info!("[FinTS] Init dialog: BLZ={} security_fn={}", self.blz, self.params.selected_security_function);
+        info!(
+            "[FinTS] Init dialog: BLZ={} security_fn={}",
+            self.blz, self.params.selected_security_function
+        );
 
         let segments = [
             self.identify_segment(),
             self.process_prep_segment(),
-            Segment::TanProcess4 { reference_seg: SegmentRef::new("HKIDN"), tan_medium: medium },
+            Segment::TanProcess4 {
+                reference_seg: SegmentRef::new("HKIDN"),
+                tan_medium: medium,
+            },
         ];
 
         let response = self.send_segments(&segments).await?;
@@ -680,8 +879,15 @@ impl Dialog<New> {
                     decoupled: challenge.decoupled || self.params.is_decoupled(),
                     ..challenge
                 };
-                info!("[FinTS] Init requires TAN: decoupled={}", challenge.decoupled);
-                return Ok(InitResult::TanRequired(self.transition(), challenge, response));
+                info!(
+                    "[FinTS] Init requires TAN: decoupled={}",
+                    challenge.decoupled
+                );
+                return Ok(InitResult::TanRequired(
+                    self.transition(),
+                    challenge,
+                    response,
+                ));
             }
         }
 
@@ -694,10 +900,7 @@ impl Dialog<New> {
     /// Initialize WITHOUT HKTAN — PIN-only. Used when bank doesn't require SCA.
     pub async fn init_no_tan(mut self) -> Result<(Dialog<Open>, Response)> {
         info!("[FinTS] Init (no HKTAN)");
-        let segments = [
-            self.identify_segment(),
-            self.process_prep_segment(),
-        ];
+        let segments = [self.identify_segment(), self.process_prep_segment()];
 
         let response = self.send_segments(&segments).await?;
         self.extract_dialog_id(&response);
@@ -751,13 +954,22 @@ impl Account {
             return Err(FinTSError::Dialog("IBAN must not be empty".into()));
         }
         if bic.is_empty() {
-            return Err(FinTSError::Dialog("BIC must not be empty. Please set the BIC in the account settings.".into()));
+            return Err(FinTSError::Dialog(
+                "BIC must not be empty. Please set the BIC in the account settings.".into(),
+            ));
         }
-        Ok(Self { iban: Iban::new(iban), bic: Bic::new(bic) })
+        Ok(Self {
+            iban: Iban::new(iban),
+            bic: Bic::new(bic),
+        })
     }
 
-    pub fn iban(&self) -> &str { self.iban.as_str() }
-    pub fn bic(&self) -> &str { self.bic.as_str() }
+    pub fn iban(&self) -> &str {
+        self.iban.as_str()
+    }
+    pub fn bic(&self) -> &str {
+        self.bic.as_str()
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -790,6 +1002,22 @@ pub enum TransactionResult {
     Success(TransactionPage),
     /// Bank requires TAN for this operation.
     NeedTan(TanChallenge),
+}
+
+/// Result of a national-account HKKAZ transaction request.
+pub enum NationalTransactionResult {
+    /// Transactions parsed successfully from HIKAZ/MT940 response data.
+    Success(NationalTransactionPage),
+    /// Bank requires TAN for this operation.
+    NeedTan(TanChallenge),
+}
+
+/// Result of a national-account HKKAZ transaction request page.
+pub struct NationalTransactionPage {
+    pub transactions: Vec<Transaction>,
+    pub raw_booked_len: usize,
+    pub raw_pending_len: usize,
+    pub touchdown: Option<TouchdownPoint>,
 }
 
 /// Result of a single securities holdings request page.
@@ -863,9 +1091,9 @@ impl Dialog<Open> {
     pub async fn balance(&mut self, account: &Account) -> Result<BalanceResult> {
         let hksal = SegmentType::new("HKSAL");
         let needs_tan = self.params.needs_tan(&hksal);
-        let mut segments = vec![
-            Segment::Balance { account: account.clone() },
-        ];
+        let mut segments = vec![Segment::Balance {
+            account: account.clone(),
+        }];
         if needs_tan {
             info!("[FinTS] balance: HKSAL + HKTAN:4 (HIPINS: TAN required)");
             segments.push(Segment::TanProcess4 {
@@ -920,14 +1148,12 @@ impl Dialog<Open> {
         let hkkaz = SegmentType::new("HKKAZ");
         let needs_tan = self.params.needs_tan(&hkkaz);
 
-        let mut segments = vec![
-            Segment::Transactions {
-                account: account.clone(),
-                start_date,
-                end_date,
-                touchdown: touchdown.cloned(),
-            },
-        ];
+        let mut segments = vec![Segment::Transactions {
+            account: account.clone(),
+            start_date,
+            end_date,
+            touchdown: touchdown.cloned(),
+        }];
 
         if is_first && needs_tan {
             info!("[FinTS] transactions: HKKAZ + HKTAN:4 (HIPINS: TAN required)");
@@ -968,6 +1194,74 @@ impl Dialog<Open> {
         }))
     }
 
+    /// Request transactions (HKKAZ) for a national non-IBAN account — single page.
+    pub async fn national_transactions(
+        &mut self,
+        account: &NationalAccount,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        touchdown: Option<&TouchdownPoint>,
+    ) -> Result<NationalTransactionResult> {
+        let is_first = touchdown.is_none();
+        let hkkaz = SegmentType::new("HKKAZ");
+        let needs_tan = self.params.needs_tan(&hkkaz);
+
+        let mut segments = vec![Segment::NationalTransactions {
+            account: account.clone(),
+            start_date,
+            end_date,
+            touchdown: touchdown.cloned(),
+        }];
+
+        if is_first && needs_tan {
+            info!("[FinTS] national_transactions: HKKAZ + HKTAN:4 (HIPINS: TAN required)");
+            segments.push(Segment::TanProcess4 {
+                reference_seg: SegmentRef::new("HKKAZ"),
+                tan_medium: self.params.selected_tan_medium.clone(),
+            });
+        } else if is_first {
+            info!("[FinTS] national_transactions: HKKAZ (HIPINS: PIN-only)");
+        }
+
+        let response = self.send_segments(&segments).await?;
+
+        for c in response.all_codes() {
+            if c.is_error() || c.is_warning() {
+                info!("[FinTS] HKKAZ national: {} - {}", c.code(), c.text);
+            }
+        }
+
+        if response.needs_tan() && !response.has_sca_exemption() {
+            if let Some(challenge) = response.get_tan_challenge() {
+                return Ok(NationalTransactionResult::NeedTan(challenge));
+            }
+        }
+
+        response.check_errors()?;
+
+        let mt940 = extract_mt940_data(&response.segments);
+        let raw_booked_len = mt940.booked.len();
+        let raw_pending_len = mt940.pending.len();
+        let mut transactions =
+            crate::mt940_parse::parse_mt940(&mt940.booked, TransactionStatus::Booked)
+                .unwrap_or_default();
+        if !mt940.pending.is_empty() {
+            transactions.extend(
+                crate::mt940_parse::parse_mt940(&mt940.pending, TransactionStatus::Pending)
+                    .unwrap_or_default(),
+            );
+        }
+
+        Ok(NationalTransactionResult::Success(
+            NationalTransactionPage {
+                transactions,
+                raw_booked_len,
+                raw_pending_len,
+                touchdown: response.touchdown(),
+            },
+        ))
+    }
+
     /// Request securities holdings (HKWPD).
     ///
     /// Takes a validated `Account` — IBAN and BIC are guaranteed non-empty.
@@ -984,13 +1278,11 @@ impl Dialog<Open> {
         let hkwpd = SegmentType::new("HKWPD");
         let needs_tan = self.params.needs_tan(&hkwpd);
 
-        let mut segments = vec![
-            Segment::Holdings {
-                account: account.clone(),
-                currency: currency.cloned(),
-                touchdown: touchdown.cloned(),
-            },
-        ];
+        let mut segments = vec![Segment::Holdings {
+            account: account.clone(),
+            currency: currency.cloned(),
+            touchdown: touchdown.cloned(),
+        }];
 
         if is_first && needs_tan {
             info!("[FinTS] holdings: HKWPD + HKTAN:4 (HIPINS: TAN required)");
@@ -1047,12 +1339,10 @@ impl Dialog<TanPending> {
     /// Per spec: sends HKTAN alone, no business segments.
     /// Returns `Confirmed` (→ Open) or `Pending` (→ still TanPending).
     pub async fn poll(mut self, task_reference: &TaskReference) -> Result<PollResult> {
-        let segments = [
-            Segment::TanPollDecoupled {
-                task_reference: task_reference.clone(),
-                tan_medium: self.params.selected_tan_medium.clone(),
-            },
-        ];
+        let segments = [Segment::TanPollDecoupled {
+            task_reference: task_reference.clone(),
+            tan_medium: self.params.selected_tan_medium.clone(),
+        }];
 
         let response = self.send_segments(&segments).await?;
 
@@ -1075,13 +1365,15 @@ impl Dialog<TanPending> {
 
     /// Submit TAN for process 2 (non-decoupled: chipTAN, SMS-TAN).
     /// TAN value is included in HNSHA.
-    pub async fn submit_tan(mut self, task_reference: &TaskReference, tan: &str) -> Result<(Dialog<Open>, Response)> {
-        let segments = [
-            Segment::TanProcess2 {
-                task_reference: task_reference.clone(),
-                tan_medium: self.params.selected_tan_medium.clone(),
-            },
-        ];
+    pub async fn submit_tan(
+        mut self,
+        task_reference: &TaskReference,
+        tan: &str,
+    ) -> Result<(Dialog<Open>, Response)> {
+        let segments = [Segment::TanProcess2 {
+            task_reference: task_reference.clone(),
+            tan_medium: self.params.selected_tan_medium.clone(),
+        }];
 
         let response = self.send_segments_with_tan(&segments, tan).await?;
         response.check_errors()?;
@@ -1106,7 +1398,10 @@ fn parse_response(data: &[u8], expected_msg_num: u16) -> Result<Response> {
         let resp_num = hnhbk.deg(4).get_str(0);
         let expected = expected_msg_num.to_string();
         if resp_num != expected && !resp_num.is_empty() {
-            warn!("Message number mismatch: expected {}, got {}", expected, resp_num);
+            warn!(
+                "Message number mismatch: expected {}, got {}",
+                expected, resp_num
+            );
         }
     }
 
@@ -1134,5 +1429,9 @@ fn parse_response(data: &[u8], expected_msg_num: u16) -> Result<Response> {
         }
     }
 
-    Ok(Response { segments: all_segments, global_codes, segment_codes })
+    Ok(Response {
+        segments: all_segments,
+        global_codes,
+        segment_codes,
+    })
 }
