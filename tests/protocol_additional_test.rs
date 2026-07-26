@@ -3,7 +3,8 @@
 use fints::protocol::{Account, BankParams};
 use fints::types::TanProcess;
 use fints::types::{
-    DialogId, ResponseCodeKind, SecurityFunction, SegmentType, SystemId, TanMethod, TouchdownPoint,
+    DialogId, ResponseCode, ResponseCodeKind, SecurityFunction, SegmentType, SystemId, TanMethod,
+    TouchdownPoint,
 };
 
 // ─── Task A.1 & A.2: Account validation and accessors ───────────────────────
@@ -124,6 +125,15 @@ fn test_response_code_3040_touchdown() {
         }
         other => panic!("Expected Touchdown, got {:?}", other),
     }
+}
+
+#[test]
+fn test_response_code_preserves_unknown_parameters() {
+    let params = vec!["20250503".to_string(), "extra".to_string()];
+    let code = ResponseCode::with_params("3030", "Von-Datum angepasst", params.clone());
+
+    assert_eq!(code.code(), "3030");
+    assert_eq!(code.parameters, params);
 }
 
 // ─── Task A.7: BankParams::needs_tan defaults to true for unknown segment ────

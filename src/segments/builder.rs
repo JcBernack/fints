@@ -5,7 +5,7 @@
 
 use chrono::{Local, NaiveDate};
 
-use crate::parser::{DEG, DataElement};
+use crate::parser::{DataElement, DEG};
 use crate::types::*;
 
 // ---- KTI (Kontoverbindung International) ----
@@ -602,8 +602,9 @@ pub(crate) fn hkcaz(
     camt_formats: &[String],
     start_date: NaiveDate,
     end_date: NaiveDate,
+    touchdown: Option<&str>,
 ) -> Vec<DEG> {
-    vec![
+    let mut degs = vec![
         seg_header("HKCAZ", segment_number, version),
         Kti::new(iban, bic).to_deg(),
         deg(camt_formats.iter().map(|format| de_text(format)).collect()),
@@ -611,7 +612,11 @@ pub(crate) fn hkcaz(
         deg1(de_date(start_date)),
         deg1(de_date(end_date)),
         deg1(de_empty()),
-    ]
+    ];
+    if let Some(touchdown) = touchdown {
+        degs.push(deg1(de_text(touchdown)));
+    }
+    degs
 }
 
 pub(crate) fn hkcaz_national(
@@ -623,8 +628,9 @@ pub(crate) fn hkcaz_national(
     camt_formats: &[String],
     start_date: NaiveDate,
     end_date: NaiveDate,
+    touchdown: Option<&str>,
 ) -> Vec<DEG> {
-    vec![
+    let mut degs = vec![
         seg_header("HKCAZ", segment_number, version),
         Kti::national_to_deg(account_number, sub_account, blz),
         deg(camt_formats.iter().map(|format| de_text(format)).collect()),
@@ -632,7 +638,11 @@ pub(crate) fn hkcaz_national(
         deg1(de_date(start_date)),
         deg1(de_date(end_date)),
         deg1(de_empty()),
-    ]
+    ];
+    if let Some(touchdown) = touchdown {
+        degs.push(deg1(de_text(touchdown)));
+    }
+    degs
 }
 
 // ---- HKWPD (Wertpapierdepotaufstellung) - Securities Holdings Request, version 1-7 ----
@@ -791,6 +801,7 @@ mod tests {
             &formats,
             start,
             end,
+            None,
         );
         let bytes = serialize_segment(&degs).unwrap();
         let wire = String::from_utf8(bytes).unwrap();
@@ -805,7 +816,17 @@ mod tests {
         let start = chrono::NaiveDate::from_ymd_opt(2026, 7, 19).unwrap();
         let end = chrono::NaiveDate::from_ymd_opt(2026, 7, 26).unwrap();
         let formats = vec!["camt.052.001.08".to_owned()];
-        let degs = hkcaz_national(3, 1, "1234567890", "01", "12030000", &formats, start, end);
+        let degs = hkcaz_national(
+            3,
+            1,
+            "1234567890",
+            "01",
+            "12030000",
+            &formats,
+            start,
+            end,
+            None,
+        );
         let bytes = serialize_segment(&degs).unwrap();
         let wire = String::from_utf8(bytes).unwrap();
         assert_eq!(

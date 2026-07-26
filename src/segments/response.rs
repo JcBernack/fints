@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
-use crate::parser::{DEG, RawSegment};
+use crate::parser::{RawSegment, DEG};
 use crate::types::*;
 
 /// Heuristic check if a string looks like an IBAN.
@@ -437,6 +437,11 @@ pub(crate) fn parse_hicazs_formats(seg: &RawSegment) -> Vec<String> {
         .collect()
 }
 
+/// Extract the bank-advertised maximum CAMT date range from HICAZS.
+pub(crate) fn parse_hicazs_time_range_days(seg: &RawSegment) -> Option<u32> {
+    seg.deg(4).get_str(0).parse().ok()
+}
+
 fn binary_values(deg: &DEG) -> Vec<Vec<u8>> {
     (0..deg.len())
         .filter_map(|index| deg.get(index).as_bytes().map(ToOwned::to_owned))
@@ -756,10 +761,17 @@ mod tests {
 
         let segment = RawSegment {
             degs: vec![
-                DEG(vec![Text("HICAZ".to_owned()), Text("1".to_owned()), Text("1".to_owned())]),
+                DEG(vec![
+                    Text("HICAZ".to_owned()),
+                    Text("1".to_owned()),
+                    Text("1".to_owned()),
+                ]),
                 DEG(vec![Text("account".to_owned())]),
                 DEG(vec![Text("camt.052.001.08".to_owned())]),
-                DEG(vec![Binary(b"<booked/>".to_vec()), Binary(b"<booked-2/>".to_vec())]),
+                DEG(vec![
+                    Binary(b"<booked/>".to_vec()),
+                    Binary(b"<booked-2/>".to_vec()),
+                ]),
                 DEG(vec![Binary(b"<pending/>".to_vec())]),
             ],
         };
@@ -785,6 +797,7 @@ mod tests {
                 "urn:iso:std:iso:20022:tech:xsd:camt.052.001.02",
             ]
         );
+        assert_eq!(parse_hicazs_time_range_days(&segment), Some(450));
     }
 
     // ── IBAN / BIC heuristics ──────────────────────────────────────────

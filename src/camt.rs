@@ -74,6 +74,8 @@ pub struct CamtReport {
     pub account: CamtAccount,
     pub balances: Vec<CamtBalance>,
     pub entries: Vec<CamtEntry>,
+    pub page_number: Option<u32>,
+    pub last_page: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -238,6 +240,18 @@ fn assign_text(
         report.account.other_id = Some(value.to_owned());
     } else if path_ends(path, &["Svcr", "FinInstnId", "BICFI"]) {
         report.account.bic = Some(value.to_owned());
+    } else if path_ends(path, &["MsgPgntn", "PgNb"]) {
+        report.page_number = Some(
+            value
+                .parse()
+                .map_err(|error| parse_error(format!("invalid CAMT page number: {error}")))?,
+        );
+    } else if path_ends(path, &["MsgPgntn", "LastPgInd"]) {
+        report.last_page = Some(
+            value
+                .parse()
+                .map_err(|error| parse_error(format!("invalid CAMT last-page flag: {error}")))?,
+        );
     }
 
     match context(path) {
@@ -515,5 +529,16 @@ mod tests {
             report.entries[0].transactions[0].original_amount,
             Some(Decimal::new(77, 2))
         );
+    }
+
+    #[test]
+    fn parses_report_page_metadata() {
+        let xml = br#"<Document><BkToCstmrAcctRpt>
+            <GrpHdr><MsgPgntn><PgNb>2</PgNb><LastPgInd>true</LastPgInd></MsgPgntn></GrpHdr>
+            <Rpt><Acct><Ccy>EUR</Ccy></Acct></Rpt>
+        </BkToCstmrAcctRpt></Document>"#;
+        let report = parse_report(xml, false).unwrap();
+        assert_eq!(report.page_number, Some(2));
+        assert_eq!(report.last_page, Some(true));
     }
 }

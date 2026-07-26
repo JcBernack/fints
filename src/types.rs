@@ -415,13 +415,16 @@ pub fn deg1(de: DataElement) -> DEG {
 // ---- High-level response types ----
 
 /// A single response code from HIRMG/HIRMS.
-/// All data is typed — the `kind` field carries any parameters.
+/// The `kind` field carries recognized parameters while `parameters` preserves
+/// bank-specific values that are not modeled by the client yet.
 #[derive(Debug, Clone)]
 pub struct ResponseCode {
     /// Classified response code with typed parameters.
     pub kind: ResponseCodeKind,
     /// Human-readable description from the bank.
     pub text: String,
+    /// Raw non-empty response parameters, in bank-supplied order.
+    pub parameters: Vec<String>,
 }
 
 impl ResponseCode {
@@ -430,6 +433,7 @@ impl ResponseCode {
         Self {
             kind: ResponseCodeKind::from_code(code, &[]),
             text: text.to_string(),
+            parameters: Vec::new(),
         }
     }
 
@@ -438,6 +442,7 @@ impl ResponseCode {
         Self {
             kind: ResponseCodeKind::from_code(code, &params),
             text: text.to_string(),
+            parameters: params,
         }
     }
 
@@ -459,10 +464,7 @@ impl ResponseCode {
                         params.push(p);
                     }
                 }
-                codes.push(ResponseCode {
-                    kind: ResponseCodeKind::from_code(&code, &params),
-                    text,
-                });
+                codes.push(ResponseCode::with_params(&code, &text, params));
             }
         }
         codes
