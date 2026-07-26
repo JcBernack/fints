@@ -83,6 +83,8 @@ pub(crate) enum Segment {
     ProcessPrep { bpd_version: u16, upd_version: u16, product_id: ProductId },
     /// HKSYN: Synchronisierung (get system_id)
     Sync,
+    /// HKSPA: SEPA-Kontoverbindung anfordern (account list request)
+    SepaAccounts,
     /// HKSAL: Saldenabfrage (balance request)
     Balance { account: Account },
     /// HKKAZ: Kontoumsätze (transaction request)
@@ -121,6 +123,10 @@ impl Segment {
             }
             Segment::Sync => {
                 hksyn(0)
+            }
+            Segment::SepaAccounts => {
+                let version = params.supported_version("HISPAS", 3).max(1);
+                hkspa(0, version)
             }
             Segment::Balance { account } => {
                 let version = params.supported_version("HISALS", 7).max(5);
@@ -807,6 +813,48 @@ pub enum HoldingsResult {
 // ── Dialog<Open> ─────────────────────────────────────────────────────────────
 
 impl Dialog<Open> {
+    /// Request SEPA account information (HKSPA).
+    ///
+    /// This is useful for banks that do not include account information in UPD
+    /// during synchronization but advertise HISPAS support in BPD.
+    pub async fn sepa_accounts(&mut self) -> Result<Vec<SepaAccount>> {
+        let hkspa = SegmentType::new("HKSPA");
+        let needs_tan = self.params.needs_tan(&hkspa);
+        let mut segments = vec![Segment::SepaAccounts];
+        if needs_tan {
+            info!("[FinTS] sepa_accounts: HKSPA + HKTAN:4 (HIPINS: TAN required)");
+            segments.push(Segment::TanProcess4 {
+                reference_seg: SegmentRef::new("HKSPA"),
+                tan_medium: self.params.selected_tan_medium.clone(),
+            });
+        } else {
+            info!("[FinTS] sepa_accounts: HKSPA (HIPINS: PIN-only)");
+        }
+
+        let response = self.send_segments(&segments).await?;
+
+        for c in response.all_codes() {
+            if c.is_error() || c.is_warning() {
+                info!("[FinTS] HKSPA: {} - {}", c.code(), c.text);
+            }
+        }
+
+        if response.needs_tan() && !response.has_sca_exemption() {
+            return Err(FinTSError::Dialog(
+                "TAN required for SEPA account list; this operation is not supported yet".into(),
+            ));
+        }
+
+        response.check_errors()?;
+
+        let mut accounts = Vec::new();
+        for hispa in response.find_segments("HISPA") {
+            accounts.extend(parse_hispa(hispa));
+        }
+
+        Ok(accounts)
+    }
+
     /// Request account balance (HKSAL).
     ///
     /// Takes a validated `Account` — IBAN and BIC are guaranteed non-empty.

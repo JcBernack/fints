@@ -117,6 +117,33 @@ async fn test_sync_dialog() {
 }
 
 #[tokio::test]
+async fn test_sepa_accounts_business_operation() {
+    // Spec: HKSPA in a normal dialog returns HISPA account information.
+    let (child, port) = match spawn_mock_server() {
+        Some(v) => v,
+        None => { eprintln!("Skipping: python3 not available"); return; }
+    };
+    let _guard = MockServerGuard(child);
+
+    let sync_dialog = mock_dialog(port);
+    let (synced, _) = sync_dialog.sync().await.expect("sync failed");
+    let (params, sys_id) = synced.end().await.expect("end failed");
+
+    let dialog = mock_dialog(port).with_system_id(&sys_id).with_params(&params);
+    let (mut open, _) = dialog.init_no_tan().await.expect("init failed");
+
+    let accounts = open.sepa_accounts().await.expect("sepa_accounts failed");
+
+    assert!(!accounts.is_empty(), "Should have accounts from HKSPA/HISPA");
+    assert!(
+        accounts.iter().any(|a| a.iban.as_str() == "DE111234567800000001"),
+        "Should have test account DE111234567800000001"
+    );
+
+    open.end().await.expect("end failed");
+}
+
+#[tokio::test]
 async fn test_init_no_tan_then_business_ops() {
     // Spec: init without HKTAN → Dialog<Open> → send business segments
     let (child, port) = match spawn_mock_server() {
