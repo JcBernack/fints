@@ -1028,6 +1028,8 @@ pub enum NationalTransactionResult {
 /// Result of a national-account HKKAZ transaction request page.
 pub struct NationalTransactionPage {
     pub transactions: Vec<Transaction>,
+    pub booked_transactions: usize,
+    pub pending_transactions: usize,
     pub raw_booked_len: usize,
     pub raw_pending_len: usize,
     pub touchdown: Option<TouchdownPoint>,
@@ -1297,19 +1299,61 @@ impl Dialog<Open> {
         let mt940 = extract_mt940_data(&response.segments);
         let raw_booked_len = mt940.booked.len();
         let raw_pending_len = mt940.pending.len();
-        let mut transactions =
-            crate::mt940_parse::parse_mt940(&mt940.booked, TransactionStatus::Booked)
-                .unwrap_or_default();
+        let mut transactions = match crate::mt940_parse::parse_mt940(
+            &mt940.booked,
+            TransactionStatus::Booked,
+        ) {
+            Ok(transactions) => transactions,
+            Err(error) => {
+                warn!(
+                    "[FinTS] HKKAZ national booked MT940 parse failed: {}; raw_bytes={} tags={}",
+                    error,
+                    raw_booked_len,
+                    crate::mt940_parse::mt940_tag_preview(&mt940.booked)
+                );
+                Vec::new()
+            }
+        };
+        let booked_transactions = transactions.len();
+        let mut pending_transactions = 0;
         if !mt940.pending.is_empty() {
-            transactions.extend(
-                crate::mt940_parse::parse_mt940(&mt940.pending, TransactionStatus::Pending)
-                    .unwrap_or_default(),
-            );
+            match crate::mt940_parse::parse_mt940(&mt940.pending, TransactionStatus::Pending) {
+                Ok(parsed_pending) => {
+                    pending_transactions = parsed_pending.len();
+                    transactions.extend(parsed_pending);
+                }
+                Err(error) => {
+                    debug!(
+                        "[FinTS] HKKAZ national pending MT940 parse failed: {}; raw_bytes={} tags={}",
+                        error,
+                        raw_pending_len,
+                        crate::mt940_parse::mt940_tag_preview(&mt940.pending)
+                    );
+                    match crate::mt940_parse::parse_pending_interim_mt940(&mt940.pending) {
+                        Ok(parsed_pending) => {
+                            pending_transactions = parsed_pending.len();
+                            debug!(
+                                "[FinTS] HKKAZ national pending interim fallback parsed {} transactions",
+                                pending_transactions
+                            );
+                            transactions.extend(parsed_pending);
+                        }
+                        Err(fallback_error) => warn!(
+                            "[FinTS] HKKAZ national pending interim fallback failed: {}; raw_bytes={} tags={}",
+                            fallback_error,
+                            raw_pending_len,
+                            crate::mt940_parse::mt940_tag_preview(&mt940.pending)
+                        ),
+                    }
+                }
+            }
         }
 
         Ok(NationalTransactionResult::Success(
             NationalTransactionPage {
                 transactions,
+                booked_transactions,
+                pending_transactions,
                 raw_booked_len,
                 raw_pending_len,
                 touchdown: response.touchdown(),

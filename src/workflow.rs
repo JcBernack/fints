@@ -600,7 +600,7 @@ impl AnyBank {
     ) -> Result<FetchResult> {
         use crate::protocol::{BalanceResult, TransactionResult};
         use crate::types::{Mt940Data, TouchdownPoint, TransactionStatus};
-        use tracing::warn;
+        use tracing::{debug, warn};
 
         // ── Balance ──
         let balance = if opts.balance {
@@ -647,18 +647,67 @@ impl AnyBank {
                     }
                 }
             }
-            let mut txns =
-                crate::mt940_parse::parse_mt940(all_booked.as_bytes(), TransactionStatus::Booked)
-                    .unwrap_or_default();
+            let mut txns = match crate::mt940_parse::parse_mt940(
+                all_booked.as_bytes(),
+                TransactionStatus::Booked,
+            ) {
+                Ok(transactions) => transactions,
+                Err(error) => {
+                    warn!(
+                        "HKKAZ booked MT940 parse failed: {}; raw_bytes={} tags={}",
+                        error,
+                        all_booked.as_bytes().len(),
+                        crate::mt940_parse::mt940_tag_preview(all_booked.as_bytes())
+                    );
+                    Vec::new()
+                }
+            };
+            let booked_count = txns.len();
+            let mut pending_count = 0;
             if !all_pending.is_empty() {
-                txns.extend(
-                    crate::mt940_parse::parse_mt940(
-                        all_pending.as_bytes(),
-                        TransactionStatus::Pending,
-                    )
-                    .unwrap_or_default(),
-                );
+                match crate::mt940_parse::parse_mt940(
+                    all_pending.as_bytes(),
+                    TransactionStatus::Pending,
+                ) {
+                    Ok(parsed_pending) => {
+                        pending_count = parsed_pending.len();
+                        txns.extend(parsed_pending);
+                    }
+                    Err(error) => {
+                        debug!(
+                            "HKKAZ pending MT940 parse failed: {}; raw_bytes={} tags={}",
+                            error,
+                            all_pending.as_bytes().len(),
+                            crate::mt940_parse::mt940_tag_preview(all_pending.as_bytes())
+                        );
+                        match crate::mt940_parse::parse_pending_interim_mt940(
+                            all_pending.as_bytes(),
+                        ) {
+                            Ok(parsed_pending) => {
+                                pending_count = parsed_pending.len();
+                                debug!(
+                                    "HKKAZ pending interim fallback parsed {} transactions",
+                                    pending_count
+                                );
+                                txns.extend(parsed_pending);
+                            }
+                            Err(fallback_error) => warn!(
+                                "HKKAZ pending interim fallback failed: {}; raw_bytes={} tags={}",
+                                fallback_error,
+                                all_pending.as_bytes().len(),
+                                crate::mt940_parse::mt940_tag_preview(all_pending.as_bytes())
+                            ),
+                        }
+                    }
+                }
             }
+            debug!(
+                "HKKAZ parsed transactions: booked_raw_bytes={} pending_raw_bytes={} booked_transactions={} pending_transactions={}",
+                all_booked.as_bytes().len(),
+                all_pending.as_bytes().len(),
+                booked_count,
+                pending_count
+            );
             txns
         } else {
             Vec::new()
