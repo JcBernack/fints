@@ -44,9 +44,10 @@ use tracing::{debug, info, warn};
 
 use chrono::NaiveDate;
 
+use crate::camt::{parse_report, CamtReport};
 use crate::error::{FinTSError, Result};
 use crate::message;
-use crate::parser::{self, DEG, RawSegment};
+use crate::parser::{self, RawSegment, DEG};
 use crate::segments::response::*;
 use crate::transport::FinTSConnection;
 use crate::types::*;
@@ -1083,15 +1084,15 @@ pub enum NationalTransactionResult {
     NeedTan(TanChallenge),
 }
 
-/// Raw CAMT documents returned by one HKCAZ request.
+/// Parsed CAMT documents returned by one HKCAZ request.
 #[derive(Debug, Clone)]
 pub struct CamtDocument {
     pub format: String,
-    pub booked: Vec<Vec<u8>>,
-    pub pending: Vec<Vec<u8>>,
+    pub booked: Vec<CamtReport>,
+    pub pending: Vec<CamtReport>,
 }
 
-/// Result of a raw CAMT transaction probe.
+/// Result of a CAMT transaction request.
 pub enum CamtResult {
     Success(Vec<CamtDocument>),
     NeedTan(TanChallenge),
@@ -1111,16 +1112,25 @@ fn camt_result_from_response(response: Response) -> Result<CamtResult> {
     }
 
     response.check_errors()?;
-    Ok(CamtResult::Success(
-        extract_camt_data(&response.segments)
-            .into_iter()
-            .map(|data| CamtDocument {
-                format: data.format,
-                booked: data.booked,
-                pending: data.pending,
-            })
-            .collect(),
-    ))
+    let mut documents = Vec::new();
+    for data in extract_camt_data(&response.segments) {
+        let booked = data
+            .booked
+            .iter()
+            .map(|payload| parse_report(payload, false))
+            .collect::<Result<Vec<_>>>()?;
+        let pending = data
+            .pending
+            .iter()
+            .map(|payload| parse_report(payload, true))
+            .collect::<Result<Vec<_>>>()?;
+        documents.push(CamtDocument {
+            format: data.format,
+            booked,
+            pending,
+        });
+    }
+    Ok(CamtResult::Success(documents))
 }
 
 /// Result of a national-account HKKAZ transaction request page.
@@ -1397,21 +1407,19 @@ impl Dialog<Open> {
         let mt940 = extract_mt940_data(&response.segments);
         let raw_booked_len = mt940.booked.len();
         let raw_pending_len = mt940.pending.len();
-        let mut transactions = match crate::mt940_parse::parse_mt940(
-            &mt940.booked,
-            TransactionStatus::Booked,
-        ) {
-            Ok(transactions) => transactions,
-            Err(error) => {
-                warn!(
+        let mut transactions =
+            match crate::mt940_parse::parse_mt940(&mt940.booked, TransactionStatus::Booked) {
+                Ok(transactions) => transactions,
+                Err(error) => {
+                    warn!(
                     "[FinTS] HKKAZ national booked MT940 parse failed: {}; raw_bytes={} tags={}",
                     error,
                     raw_booked_len,
                     crate::mt940_parse::mt940_tag_preview(&mt940.booked)
                 );
-                Vec::new()
-            }
-        };
+                    Vec::new()
+                }
+            };
         let booked_transactions = transactions.len();
         let mut pending_transactions = 0;
         if !mt940.pending.is_empty() {

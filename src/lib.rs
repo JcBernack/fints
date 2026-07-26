@@ -58,6 +58,7 @@ pub mod types;
 
 // ── Tooling ──
 pub mod audit;
+pub mod camt;
 pub mod debug;
 
 // ── Architecture ──
@@ -85,6 +86,10 @@ pub use protocol::{
     HoldingsResult, InitResult, NationalTransactionPage, NationalTransactionResult, New, Open,
     PollResult, Response, SendResult, Synced, TanChallenge, TanPending, TransactionPage,
     TransactionResult,
+};
+
+pub use camt::{
+    CamtAccount, CamtBalance, CamtCode, CamtEntry, CamtParty, CamtReport, CamtTransaction,
 };
 
 // Domain types
