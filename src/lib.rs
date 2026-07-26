@@ -81,9 +81,10 @@ pub use workflow::{FetchOpts, FetchResult, InitiateNoTanResult, InitiateOutcome,
 
 // Protocol layer
 pub use protocol::{
-    Account, BalanceResult, BankParams, Dialog, HoldingsPage, HoldingsResult, InitResult,
-    NationalTransactionPage, NationalTransactionResult, New, Open, PollResult, Response,
-    SendResult, Synced, TanChallenge, TanPending, TransactionPage, TransactionResult,
+    Account, BalanceResult, BankParams, CamtDocument, CamtResult, Dialog, HoldingsPage,
+    HoldingsResult, InitResult, NationalTransactionPage, NationalTransactionResult, New, Open,
+    PollResult, Response, SendResult, Synced, TanChallenge, TanPending, TransactionPage,
+    TransactionResult,
 };
 
 // Domain types

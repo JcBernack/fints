@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
-use crate::parser::RawSegment;
+use crate::parser::{DEG, RawSegment};
 use crate::types::*;
 
 /// Heuristic check if a string looks like an IBAN.
@@ -404,6 +404,45 @@ pub(crate) fn extract_mt940_data(segments: &[RawSegment]) -> Mt940ExtractedData 
     Mt940ExtractedData { booked, pending }
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CamtExtractedData {
+    pub format: String,
+    pub booked: Vec<Vec<u8>>,
+    pub pending: Vec<Vec<u8>>,
+}
+
+/// Extract raw CAMT documents from HICAZ response segments without parsing XML.
+pub(crate) fn extract_camt_data(segments: &[RawSegment]) -> Vec<CamtExtractedData> {
+    segments
+        .iter()
+        .filter(|segment| segment.segment_type() == "HICAZ")
+        .map(|segment| CamtExtractedData {
+            format: segment.deg(2).get_str(0),
+            booked: binary_values(segment.deg(3)),
+            pending: binary_values(segment.deg(4)),
+        })
+        .collect()
+}
+
+/// Extract CAMT format URNs from HICAZS transaction parameters.
+///
+/// HICAZS stores the transaction-time parameters in DEG 4: the first three
+/// data elements are time range, max-entry support, and all-accounts support;
+/// CAMT formats begin at data element 4.
+pub(crate) fn parse_hicazs_formats(seg: &RawSegment) -> Vec<String> {
+    let parameters = seg.deg(4);
+    (3..parameters.len())
+        .map(|index| parameters.get_str(index))
+        .filter(|format| !format.is_empty())
+        .collect()
+}
+
+fn binary_values(deg: &DEG) -> Vec<Vec<u8>> {
+    (0..deg.len())
+        .filter_map(|index| deg.get(index).as_bytes().map(ToOwned::to_owned))
+        .collect()
+}
+
 /// Parse HIWPD (securities depot response) — extracts holdings.
 ///
 /// HIWPD response segment structure per FinTS spec:
@@ -709,6 +748,43 @@ mod tests {
     fn parse_segment(s: &str) -> RawSegment {
         let segments = parser::parse_message(s.as_bytes()).unwrap();
         segments.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn extracts_raw_camt_documents() {
+        use crate::parser::DataElement::{Binary, Text};
+
+        let segment = RawSegment {
+            degs: vec![
+                DEG(vec![Text("HICAZ".to_owned()), Text("1".to_owned()), Text("1".to_owned())]),
+                DEG(vec![Text("account".to_owned())]),
+                DEG(vec![Text("camt.052.001.08".to_owned())]),
+                DEG(vec![Binary(b"<booked/>".to_vec()), Binary(b"<booked-2/>".to_vec())]),
+                DEG(vec![Binary(b"<pending/>".to_vec())]),
+            ],
+        };
+
+        let documents = extract_camt_data(&[segment]);
+
+        assert_eq!(documents.len(), 1);
+        assert_eq!(documents[0].format, "camt.052.001.08");
+        assert_eq!(documents[0].booked.len(), 2);
+        assert_eq!(documents[0].pending, vec![b"<pending/>".to_vec()]);
+    }
+
+    #[test]
+    fn parses_hicazs_camt_formats_from_parameter_group() {
+        let segment = parse_segment(
+            "HICAZS:17:1:4+1+1+0+450:N:N:urn?:iso?:std?:iso?:20022?:tech?:xsd?:camt.052.001.08:urn?:iso?:std?:iso?:20022?:tech?:xsd?:camt.052.001.02'",
+        );
+
+        assert_eq!(
+            parse_hicazs_formats(&segment),
+            vec![
+                "urn:iso:std:iso:20022:tech:xsd:camt.052.001.08",
+                "urn:iso:std:iso:20022:tech:xsd:camt.052.001.02",
+            ]
+        );
     }
 
     // ── IBAN / BIC heuristics ──────────────────────────────────────────

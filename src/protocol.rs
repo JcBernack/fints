@@ -111,6 +111,20 @@ pub(crate) enum Segment {
         end_date: NaiveDate,
         touchdown: Option<TouchdownPoint>,
     },
+    /// HKCAZ: CAMT transaction request.
+    CamtTransactions {
+        account: Account,
+        camt_formats: Vec<String>,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    },
+    /// HKCAZ with national account identity for non-IBAN HIUPD accounts.
+    NationalCamtTransactions {
+        account: NationalAccount,
+        camt_formats: Vec<String>,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    },
     /// HKWPD: Wertpapierdepotaufstellung (securities holdings request)
     Holdings {
         account: Account,
@@ -204,6 +218,41 @@ impl Segment {
                     *start_date,
                     *end_date,
                     touchdown.as_ref().map(|t| t.as_str()),
+                )
+            }
+            Segment::CamtTransactions {
+                account,
+                camt_formats,
+                start_date,
+                end_date,
+            } => {
+                let version = params.supported_version("HICAZS", 1).max(1);
+                hkcaz(
+                    0,
+                    version,
+                    account.iban(),
+                    account.bic(),
+                    camt_formats,
+                    *start_date,
+                    *end_date,
+                )
+            }
+            Segment::NationalCamtTransactions {
+                account,
+                camt_formats,
+                start_date,
+                end_date,
+            } => {
+                let version = params.supported_version("HICAZS", 1).max(1);
+                hkcaz_national(
+                    0,
+                    version,
+                    &account.account_number,
+                    &account.sub_account,
+                    account.blz.as_str(),
+                    camt_formats,
+                    *start_date,
+                    *end_date,
                 )
             }
             Segment::Holdings {
@@ -525,6 +574,15 @@ impl BankParams {
             param_segment_type, result, v, max_version
         );
         result
+    }
+
+    /// CAMT message formats advertised by HICAZS, in bank preference order.
+    pub fn supported_camt_formats(&self) -> Vec<String> {
+        self.bpd_segments
+            .iter()
+            .filter(|segment| segment.segment_type() == "HICAZS")
+            .flat_map(parse_hicazs_formats)
+            .collect()
     }
 
     /// Select the best security function from 3920 allowed list.
@@ -1025,6 +1083,46 @@ pub enum NationalTransactionResult {
     NeedTan(TanChallenge),
 }
 
+/// Raw CAMT documents returned by one HKCAZ request.
+#[derive(Debug, Clone)]
+pub struct CamtDocument {
+    pub format: String,
+    pub booked: Vec<Vec<u8>>,
+    pub pending: Vec<Vec<u8>>,
+}
+
+/// Result of a raw CAMT transaction probe.
+pub enum CamtResult {
+    Success(Vec<CamtDocument>),
+    NeedTan(TanChallenge),
+}
+
+fn camt_result_from_response(response: Response) -> Result<CamtResult> {
+    for code in response.all_codes() {
+        if code.is_error() || code.is_warning() {
+            info!("[FinTS] HKCAZ: {} - {}", code.code(), code.text);
+        }
+    }
+
+    if response.needs_tan() && !response.has_sca_exemption() {
+        if let Some(challenge) = response.get_tan_challenge() {
+            return Ok(CamtResult::NeedTan(challenge));
+        }
+    }
+
+    response.check_errors()?;
+    Ok(CamtResult::Success(
+        extract_camt_data(&response.segments)
+            .into_iter()
+            .map(|data| CamtDocument {
+                format: data.format,
+                booked: data.booked,
+                pending: data.pending,
+            })
+            .collect(),
+    ))
+}
+
 /// Result of a national-account HKKAZ transaction request page.
 pub struct NationalTransactionPage {
     pub transactions: Vec<Transaction>,
@@ -1359,6 +1457,81 @@ impl Dialog<Open> {
                 touchdown: response.touchdown(),
             },
         ))
+    }
+
+    /// Request raw CAMT transaction documents (HKCAZ) for one SEPA account.
+    ///
+    /// This intentionally returns the bank's binary documents without parsing
+    /// them so callers can inspect bank-specific CAMT output first.
+    pub async fn camt_transactions(
+        &mut self,
+        account: &Account,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> Result<CamtResult> {
+        let formats = self.params.supported_camt_formats();
+        if formats.is_empty() {
+            return Err(FinTSError::Dialog(
+                "bank did not advertise a CAMT format in HICAZS".into(),
+            ));
+        }
+
+        let hkcaz = SegmentType::new("HKCAZ");
+        let needs_tan = self.params.needs_tan(&hkcaz);
+        let mut segments = vec![Segment::CamtTransactions {
+            account: account.clone(),
+            camt_formats: formats,
+            start_date,
+            end_date,
+        }];
+        if needs_tan {
+            info!("[FinTS] camt_transactions: HKCAZ + HKTAN:4 (HIPINS: TAN required)");
+            segments.push(Segment::TanProcess4 {
+                reference_seg: SegmentRef::new("HKCAZ"),
+                tan_medium: self.params.selected_tan_medium.clone(),
+            });
+        } else {
+            info!("[FinTS] camt_transactions: HKCAZ (HIPINS: PIN-only)");
+        }
+
+        let response = self.send_segments(&segments).await?;
+        camt_result_from_response(response)
+    }
+
+    /// Request raw CAMT transaction documents (HKCAZ) for a national account.
+    pub async fn national_camt_transactions(
+        &mut self,
+        account: &NationalAccount,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> Result<CamtResult> {
+        let formats = self.params.supported_camt_formats();
+        if formats.is_empty() {
+            return Err(FinTSError::Dialog(
+                "bank did not advertise a CAMT format in HICAZS".into(),
+            ));
+        }
+
+        let hkcaz = SegmentType::new("HKCAZ");
+        let needs_tan = self.params.needs_tan(&hkcaz);
+        let mut segments = vec![Segment::NationalCamtTransactions {
+            account: account.clone(),
+            camt_formats: formats,
+            start_date,
+            end_date,
+        }];
+        if needs_tan {
+            info!("[FinTS] national_camt_transactions: HKCAZ + HKTAN:4 (HIPINS: TAN required)");
+            segments.push(Segment::TanProcess4 {
+                reference_seg: SegmentRef::new("HKCAZ"),
+                tan_medium: self.params.selected_tan_medium.clone(),
+            });
+        } else {
+            info!("[FinTS] national_camt_transactions: HKCAZ (HIPINS: PIN-only)");
+        }
+
+        let response = self.send_segments(&segments).await?;
+        camt_result_from_response(response)
     }
 
     /// Request securities holdings (HKWPD).
