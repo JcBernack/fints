@@ -140,34 +140,6 @@ pub(crate) fn parse_hitan(seg: &RawSegment) -> (String, String, Option<Vec<u8>>)
     (task_ref, challenge, challenge_hhduc)
 }
 
-/// Parse HITAB (TAN media list response).
-/// Returns a list of TAN medium names (e.g. "Handy-Nr. +49 151 xxx", "Authenticator App").
-/// These are the registered devices/channels that can receive pushTAN notifications.
-pub(crate) fn parse_hitab(seg: &RawSegment) -> Vec<String> {
-    let mut media = Vec::new();
-
-    // HITAB: DEG0=header, DEG1+=TanMediumList entries
-    // Each entry is a DEG with: status:medium_class:medium_name[:mobile_no_masked:...]
-    // status: A=active, I=inactive, B=blocked
-    for i in 1..seg.deg_count() {
-        let d = seg.deg(i);
-        if d.len() < 3 {
-            continue;
-        }
-        let status = d.get_str(0);
-        // Only include active media
-        if status != "A" && status != "1" {
-            continue;
-        }
-        let name = d.get_str(2);
-        if !name.is_empty() {
-            media.push(name);
-        }
-    }
-
-    media
-}
-
 /// Parse HISPA (SEPA account information response).
 pub(crate) fn parse_hispa(seg: &RawSegment) -> Vec<SepaAccount> {
     let mut accounts = Vec::new();
@@ -718,6 +690,7 @@ pub(crate) fn find_touchdown(codes: &[ResponseCode]) -> Option<TouchdownPoint> {
 }
 
 /// Check response codes for errors and return the first error found.
+#[cfg(test)]
 pub(crate) fn find_error(codes: &[ResponseCode]) -> Option<&ResponseCode> {
     codes.iter().find(|c| c.is_error())
 }

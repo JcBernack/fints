@@ -7,7 +7,6 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::str::FromStr;
 
 use crate::parser::{DataElement, RawSegment, DEG};
 
@@ -221,10 +220,6 @@ pub enum ResponseCodeKind {
 }
 
 impl ResponseCodeKind {
-    fn default_unknown() -> Self {
-        Self::Unknown(String::new())
-    }
-
     pub fn from_code(code: &str, parameters: &[String]) -> Self {
         match code {
             "0010" => Self::MessageReceived,
@@ -318,15 +313,6 @@ pub(crate) fn read_opt_str(seg: &RawSegment, deg: usize, de: usize) -> Option<St
     }
 }
 
-/// Read an integer from a DE.
-pub(crate) fn read_int(seg: &RawSegment, deg: usize, de: usize) -> i64 {
-    seg.deg(deg)
-        .get(de)
-        .as_str()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0)
-}
-
 /// Read a u16 from a DE.
 pub(crate) fn read_u16(seg: &RawSegment, deg: usize, de: usize) -> u16 {
     seg.deg(deg)
@@ -336,34 +322,9 @@ pub(crate) fn read_u16(seg: &RawSegment, deg: usize, de: usize) -> u16 {
         .unwrap_or(0)
 }
 
-/// Read a FinTS date (YYYYMMDD format) from a DE.
-pub(crate) fn read_date(seg: &RawSegment, deg: usize, de: usize) -> Option<NaiveDate> {
-    let s = seg.deg(deg).get(de).as_text();
-    if s.len() == 8 {
-        NaiveDate::parse_from_str(&s, "%Y%m%d").ok()
-    } else {
-        None
-    }
-}
-
-/// Read a FinTS amount (comma as decimal separator) from a DE.
-pub(crate) fn read_amount(seg: &RawSegment, deg: usize, de: usize) -> Option<Decimal> {
-    let s = seg.deg(deg).get(de).as_text();
-    if s.is_empty() {
-        return None;
-    }
-    let normalized = s.replace(',', ".");
-    Decimal::from_str(&normalized).ok()
-}
-
 /// Read binary data from a DE.
 pub(crate) fn read_binary(seg: &RawSegment, deg: usize, de: usize) -> Option<Vec<u8>> {
     seg.deg(deg).get(de).as_bytes().map(|b| b.to_vec())
-}
-
-/// Read a boolean (J/N) from a DE.
-pub(crate) fn read_bool(seg: &RawSegment, deg: usize, de: usize) -> bool {
-    seg.deg(deg).get(de).as_text() == "J"
 }
 
 // ---- DE construction helpers ----

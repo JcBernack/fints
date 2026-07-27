@@ -38,7 +38,7 @@ struct SecurityContext<'a> {
 ///   HNSHA:N:2 (signature footer with PIN/TAN)
 /// HNHBS:N+1:1 (message trailer)
 /// ```
-pub(crate) fn build_from_segments(
+fn build_from_segments(
     ctx: &SecurityContext<'_>,
     segments: &[Segment],
     params: &BankParams,
@@ -214,7 +214,7 @@ pub(crate) fn build_end_message(
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// Build a message from raw DEGs. Used only by unit tests.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn build_message(
     dialog_id: &str,
     message_number: u16,

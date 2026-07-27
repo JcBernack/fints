@@ -101,15 +101,6 @@ pub fn serialize_segment(degs: &[DEG]) -> Result<Vec<u8>, FinTSError> {
     Ok(out)
 }
 
-/// Serialize a list of segments into a complete FinTS message.
-pub fn serialize_message(segments: &[Vec<DEG>]) -> Result<Vec<u8>, FinTSError> {
-    let mut out = Vec::new();
-    for seg_degs in segments {
-        out.extend(serialize_segment(seg_degs)?);
-    }
-    Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

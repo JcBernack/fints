@@ -553,24 +553,6 @@ fn check_response_code_rules(segments: &[RawSegment], ctx: &mut AuditContext) {
 mod tests {
     use super::*;
 
-    /// Minimal valid outer wrapper without inner segments.
-    fn minimal_outer(inner_payload: &[u8]) -> Vec<u8> {
-        // HNHBK with size ~100, version 300, dialog 0, msg 1
-        // HNVSK at seg 998
-        // HNVSD at seg 999 with binary payload
-        // HNHBS as last
-        let payload_len = inner_payload.len();
-        let hnvsd_part = format!("HNVSD:999:1+@{}@", payload_len);
-        let mut msg = Vec::new();
-        msg.extend_from_slice(b"HNHBK:1:3+000000000100+300+0+1+1'");
-        msg.extend_from_slice(b"HNVSK:998:3+998+1+1::0+1:20200101:120000+2:2:13:@8@00000000:5:1+280:12345678:user:V:0:0+0'");
-        msg.extend_from_slice(hnvsd_part.as_bytes());
-        msg.extend_from_slice(inner_payload);
-        msg.push(b'\'');
-        msg.extend_from_slice(b"HNHBS:6:1+1'");
-        msg
-    }
-
     #[test]
     fn test_audit_client_no_hnhbk() {
         let data = b"HNHBS:5:1+1'";

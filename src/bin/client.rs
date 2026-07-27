@@ -33,11 +33,11 @@ use fints::{
     flow::{Flow, SyncResult},
     protocol::{Dialog, PollResult},
     types::{
-        AccountBalance, Blz, Bic, Iban, Pin, ProductId, SepaAccount, SecurityHolding,
-        SystemId, TanMethod, Transaction, UserId,
+        AccountBalance, Blz, Pin, ProductId, SecurityHolding, SepaAccount, SystemId, TanMethod,
+        Transaction, UserId,
     },
     workflow::FetchOpts,
-    BankConfig, BankName, FinTSUrl,
+    BankConfig,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

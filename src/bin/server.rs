@@ -133,6 +133,7 @@ struct ServerState {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct DialogState {
     dialog_id: String,
     message_count: u32,
@@ -154,6 +155,7 @@ struct SystemInfo {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct ServerConfig {
     tan_mode: TanMode,
     auto_confirm_secs: u64,
@@ -175,6 +177,7 @@ struct Fixtures {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct MockAccount {
     iban: String,
     #[allow(dead_code)]

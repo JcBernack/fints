@@ -78,16 +78,6 @@ pub(crate) fn seg_header(seg_type: &str, number: u16, version: u16) -> DEG {
     deg(vec![de_text(seg_type), de_num(number), de_num(version)])
 }
 
-/// Create a segment header with reference: `TYPE:NUMBER:VERSION:REFERENCE`
-pub(crate) fn seg_header_ref(seg_type: &str, number: u16, version: u16, reference: u16) -> DEG {
-    deg(vec![
-        de_text(seg_type),
-        de_num(number),
-        de_num(version),
-        de_num(reference),
-    ])
-}
-
 // ---- HNHBK (Nachrichtenkopf) - Message Header, version 3 ----
 
 /// Build HNHBK:1:3 (message header).
@@ -426,18 +416,6 @@ pub(crate) fn hktan_process_s(
     }
 
     degs
-}
-
-// ---- HKTAB (TAN-Medium anfordern) - TAN Media List Request, version 4/5 ----
-
-/// Build HKTAB to request the list of registered TAN media (devices).
-/// Returns HITAB response with device names needed for pushTAN.
-pub(crate) fn hktab(segment_number: u16, version: u16) -> Vec<DEG> {
-    vec![
-        seg_header("HKTAB", segment_number, version),
-        // TAN medium class: A = all
-        deg1(de_text("A")),
-    ]
 }
 
 // ---- HKSPA (SEPA-Kontoverbindung anfordern) - SEPA Account Info, version 1-3 ----
