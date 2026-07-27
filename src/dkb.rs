@@ -28,7 +28,7 @@
 
 use crate::error::{FinTSError, Result};
 use crate::protocol::*;
-use crate::types::{SystemId, TaskReference, ChallengeText, HhdUcData, UserId, Pin, ProductId};
+use crate::types::{ChallengeText, HhdUcData, Pin, ProductId, SystemId, TaskReference, UserId};
 use crate::workflow::{BankOps, Dkb, FetchResult, InitiateOutcome};
 
 /// A DKB session in progress. Wraps the dialog state machine.
@@ -79,7 +79,9 @@ pub async fn connect(
 ) -> Result<(Session, Challenge)> {
     let bank = Dkb::new();
 
-    let outcome = bank.initiate(username, pin, product_id, system_id, None, None).await?;
+    let outcome = bank
+        .initiate(username, pin, product_id, system_id, None, None)
+        .await?;
 
     match outcome {
         InitiateOutcome::NeedTan(result) => {
@@ -122,13 +124,14 @@ impl Session {
     /// Returns `Err` with "TAN still pending" if not yet confirmed — retry after waiting.
     ///
     /// On success, the dialog is closed and the session is consumed.
-    pub async fn fetch(
-        self,
-        account: &Account,
-        days: u32,
-    ) -> Result<FetchResult> {
+    pub async fn fetch(self, account: &Account, days: u32) -> Result<FetchResult> {
         match self {
-            Session::WaitingForTan { dialog, task_reference, bank, .. } => {
+            Session::WaitingForTan {
+                dialog,
+                task_reference,
+                bank,
+                ..
+            } => {
                 let poll_result = dialog.poll(&task_reference).await?;
                 match poll_result {
                     PollResult::Confirmed(mut open, _response) => {
@@ -136,14 +139,14 @@ impl Session {
                         open.end().await.ok();
                         Ok(result)
                     }
-                    PollResult::Pending(_dialog) => {
-                        Err(FinTSError::Dialog(
-                            "TAN still pending: user has not yet confirmed in banking app".into()
-                        ))
-                    }
+                    PollResult::Pending(_dialog) => Err(FinTSError::Dialog(
+                        "TAN still pending: user has not yet confirmed in banking app".into(),
+                    )),
                 }
             }
-            Session::Ready { mut dialog, bank, .. } => {
+            Session::Ready {
+                mut dialog, bank, ..
+            } => {
                 let result = bank.fetch(&mut dialog, account, days).await?;
                 dialog.end().await.ok();
                 Ok(result)

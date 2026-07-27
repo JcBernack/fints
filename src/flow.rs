@@ -74,7 +74,16 @@ impl Flow {
         target_iban: Option<&Iban>,
         target_bic: Option<&Bic>,
     ) -> Result<(Self, ChallengeInfo)> {
-        Self::initiate_inner(bank, username, pin, product_id, system_id, target_iban, target_bic).await
+        Self::initiate_inner(
+            bank,
+            username,
+            pin,
+            product_id,
+            system_id,
+            target_iban,
+            target_bic,
+        )
+        .await
     }
 
     /// Step 1: initiate connection, get TAN challenge.
@@ -88,7 +97,16 @@ impl Flow {
         target_bic: Option<&Bic>,
     ) -> Result<(Self, ChallengeInfo)> {
         let bank = bank_ops(bank_id)?;
-        Self::initiate_inner(bank, username, pin, product_id, system_id, target_iban, target_bic).await
+        Self::initiate_inner(
+            bank,
+            username,
+            pin,
+            product_id,
+            system_id,
+            target_iban,
+            target_bic,
+        )
+        .await
     }
 
     async fn initiate_inner(
@@ -100,15 +118,22 @@ impl Flow {
         target_iban: Option<&Iban>,
         target_bic: Option<&Bic>,
     ) -> Result<(Self, ChallengeInfo)> {
-        let outcome = bank.initiate(
-            username, pin, product_id, system_id, target_iban, target_bic,
-        ).await?;
+        let outcome = bank
+            .initiate(
+                username,
+                pin,
+                product_id,
+                system_id,
+                target_iban,
+                target_bic,
+            )
+            .await?;
 
         match outcome {
             InitiateOutcome::NeedTan(result) => {
                 let info = ChallengeInfo {
                     challenge: result.challenge.challenge.clone(),
-                    challenge_hhduc: result.challenge.challenge_hhduc.clone(),      
+                    challenge_hhduc: result.challenge.challenge_hhduc.clone(),
                     decoupled: result.challenge.decoupled,
                     tan_methods: result.tan_methods,
                     allowed_security_functions: result.allowed_security_functions,
@@ -127,7 +152,7 @@ impl Flow {
             InitiateOutcome::Authenticated(result) => {
                 let info = ChallengeInfo {
                     challenge: ChallengeText::new(""),
-                    challenge_hhduc: None,      
+                    challenge_hhduc: None,
                     decoupled: false,
                     tan_methods: result.tan_methods,
                     allowed_security_functions: result.allowed_security_functions,
@@ -135,7 +160,9 @@ impl Flow {
                 };
                 let flow = Flow {
                     bank,
-                    state: FlowState::Authenticated { dialog: result.dialog },
+                    state: FlowState::Authenticated {
+                        dialog: result.dialog,
+                    },
                     system_id: result.system_id,
                 };
                 Ok((flow, info))
@@ -151,7 +178,8 @@ impl Flow {
         bic: &str,
         days: u32,
     ) -> Result<SyncResult> {
-        self.confirm_and_fetch_opts(iban, bic, &FetchOpts::all(days)).await
+        self.confirm_and_fetch_opts(iban, bic, &FetchOpts::all(days))
+            .await
     }
 
     /// Step 2 with fine-grained fetch control.
@@ -165,7 +193,10 @@ impl Flow {
         let state = std::mem::replace(&mut self.state, FlowState::Done);
 
         match state {
-            FlowState::WaitingForTan { dialog, task_reference } => {
+            FlowState::WaitingForTan {
+                dialog,
+                task_reference,
+            } => {
                 let poll_result = dialog.poll(&task_reference).await?;
 
                 match poll_result {
@@ -176,16 +207,21 @@ impl Flow {
                         let sys_id = open.system_id().clone();
                         open.end().await.ok();
                         Ok(SyncResult {
-                            iban: Iban::new(iban), bic: Bic::new(bic),
-                            balance: fetch.balance, transactions: fetch.transactions,
+                            iban: Iban::new(iban),
+                            bic: Bic::new(bic),
+                            balance: fetch.balance,
+                            transactions: fetch.transactions,
                             holdings: fetch.holdings,
                             system_id: Some(sys_id),
                         })
                     }
                     PollResult::Pending(dialog) => {
-                        self.state = FlowState::WaitingForTan { dialog, task_reference };
+                        self.state = FlowState::WaitingForTan {
+                            dialog,
+                            task_reference,
+                        };
                         Err(FinTSError::Dialog(
-                            "TAN still pending: user has not yet confirmed in banking app".into()
+                            "TAN still pending: user has not yet confirmed in banking app".into(),
                         ))
                     }
                 }
@@ -193,19 +229,22 @@ impl Flow {
             FlowState::Authenticated { mut dialog } => {
                 info!("[Flow] Already authenticated — fetching directly");
                 let account = self.resolve_account(iban, bic)?;
-                let fetch = self.bank.fetch_with_opts(&mut dialog, &account, opts).await?;
+                let fetch = self
+                    .bank
+                    .fetch_with_opts(&mut dialog, &account, opts)
+                    .await?;
                 let sys_id = dialog.system_id().clone();
                 dialog.end().await.ok();
                 Ok(SyncResult {
-                    iban: Iban::new(iban), bic: Bic::new(bic),
-                    balance: fetch.balance, transactions: fetch.transactions,
+                    iban: Iban::new(iban),
+                    bic: Bic::new(bic),
+                    balance: fetch.balance,
+                    transactions: fetch.transactions,
                     holdings: fetch.holdings,
                     system_id: Some(sys_id),
                 })
             }
-            FlowState::Done => {
-                Err(FinTSError::Dialog("Flow already completed".into()))
-            }
+            FlowState::Done => Err(FinTSError::Dialog("Flow already completed".into())),
         }
     }
 
@@ -218,7 +257,10 @@ impl Flow {
         let state = std::mem::replace(&mut self.state, FlowState::Done);
 
         match state {
-            FlowState::WaitingForTan { dialog, task_reference } => {
+            FlowState::WaitingForTan {
+                dialog,
+                task_reference,
+            } => {
                 let poll_result = dialog.poll(&task_reference).await?;
 
                 match poll_result {
@@ -230,9 +272,12 @@ impl Flow {
                         Ok(holdings)
                     }
                     PollResult::Pending(dialog) => {
-                        self.state = FlowState::WaitingForTan { dialog, task_reference };
+                        self.state = FlowState::WaitingForTan {
+                            dialog,
+                            task_reference,
+                        };
                         Err(FinTSError::Dialog(
-                            "TAN still pending: user has not yet confirmed in banking app".into()
+                            "TAN still pending: user has not yet confirmed in banking app".into(),
                         ))
                     }
                 }
@@ -244,17 +289,21 @@ impl Flow {
                 dialog.end().await.ok();
                 Ok(holdings)
             }
-            FlowState::Done => {
-                Err(FinTSError::Dialog("Flow already completed".into()))
-            }
+            FlowState::Done => Err(FinTSError::Dialog("Flow already completed".into())),
         }
     }
 
-    pub fn system_id(&self) -> &SystemId { &self.system_id }
+    pub fn system_id(&self) -> &SystemId {
+        &self.system_id
+    }
 
     /// Resolve account with bank's BIC as fallback.
     fn resolve_account(&self, iban: &str, bic: &str) -> Result<Account> {
-        let bic = if bic.is_empty() { self.bank.config().bic.as_str() } else { bic };
+        let bic = if bic.is_empty() {
+            self.bank.config().bic.as_str()
+        } else {
+            bic
+        };
         Account::new(iban, bic)
     }
 }
