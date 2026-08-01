@@ -430,6 +430,12 @@ fn normalize_report(report: &mut CamtReport) {
             if transaction.currency.is_empty() {
                 transaction.currency = entry.currency.clone();
             }
+            if transaction.amount.is_zero() && !entry.amount.is_zero() {
+                transaction.amount = entry.amount;
+            }
+            if transaction.credit_debit.is_empty() {
+                transaction.credit_debit = entry.credit_debit.clone();
+            }
             if transaction.code.domain.is_none() {
                 transaction.code = entry.code.clone();
             }
@@ -570,6 +576,23 @@ mod tests {
         let raw_entry = report.entries[0].raw_xml.as_deref().unwrap();
         assert!(raw_entry.contains("<Ustrd>First</Ustrd>"));
         assert!(raw_entry.contains("<Ustrd>Second</Ustrd>"));
+    }
+
+    #[test]
+    fn inherits_entry_debit_indicator_when_transaction_details_omit_it() {
+        let xml = br#"<Document><BkToCstmrAcctRpt><Rpt><Acct><Ccy>EUR</Ccy></Acct>
+            <Ntry><Amt Ccy="EUR">5.82</Amt><CdtDbtInd>DBIT</CdtDbtInd>
+              <Sts><Cd>BOOK</Cd></Sts><BookgDt><Dt>2019-08-09</Dt></BookgDt>
+              <NtryDtls><TxDtls><Refs><EndToEndId>e2e-1</EndToEndId></Refs>
+                <Amt Ccy="EUR">5.82</Amt>
+              </TxDtls></NtryDtls>
+            </Ntry></Rpt></BkToCstmrAcctRpt></Document>"#;
+        let report = parse_report(xml, false).unwrap();
+        assert_eq!(
+            report.entries[0].transactions[0].amount,
+            Decimal::new(582, 2)
+        );
+        assert_eq!(report.entries[0].transactions[0].credit_debit, "DBIT");
     }
 
     #[test]
