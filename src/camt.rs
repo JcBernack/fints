@@ -67,6 +67,7 @@ pub struct CamtEntry {
     pub code: CamtCode,
     pub additional_info: Option<String>,
     pub transactions: Vec<CamtTransaction>,
+    pub raw_xml: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -96,6 +97,7 @@ pub fn parse_report(xml: &[u8], pending: bool) -> Result<CamtReport> {
     let mut entry: Option<CamtEntry> = None;
     let mut transaction: Option<CamtTransaction> = None;
     let mut amount_currency: Option<String> = None;
+    let mut entry_start: Option<usize> = None;
 
     loop {
         match reader.read_event_into(&mut buffer) {
@@ -113,6 +115,9 @@ pub fn parse_report(xml: &[u8], pending: bool) -> Result<CamtReport> {
                         });
                     }
                     "Ntry" => {
+                        let end = reader.buffer_position() as usize;
+                        let start_tag_length = start.as_ref().len().saturating_add(2);
+                        entry_start = end.checked_sub(start_tag_length);
                         entry = Some(CamtEntry {
                             amount: Decimal::ZERO,
                             currency: String::new(),
@@ -124,6 +129,7 @@ pub fn parse_report(xml: &[u8], pending: bool) -> Result<CamtReport> {
                             code: CamtCode::default(),
                             additional_info: None,
                             transactions: Vec::new(),
+                            raw_xml: None,
                         });
                     }
                     "TxDtls" => {
@@ -188,6 +194,17 @@ pub fn parse_report(xml: &[u8], pending: bool) -> Result<CamtReport> {
                     }
                     "Ntry" => {
                         if let Some(entry) = entry.take() {
+                            let end = reader.buffer_position() as usize;
+                            let raw_xml = entry_start
+                                .take()
+                                .and_then(|start| xml.get(start..end))
+                                .map(|raw| {
+                                    String::from_utf8(raw.to_owned())
+                                        .map_err(|error| parse_error(error.to_string()))
+                                })
+                                .transpose()?;
+                            let mut entry = entry;
+                            entry.raw_xml = raw_xml;
                             report.entries.push(entry);
                         }
                     }
@@ -507,6 +524,10 @@ mod tests {
             report.entries[0].transactions[0].creditor.name.as_deref(),
             Some("Merchant")
         );
+        let raw_entry = report.entries[0].raw_xml.as_deref().unwrap();
+        assert!(raw_entry.starts_with("<Ntry>"));
+        assert!(raw_entry.contains("<AcctSvcrRef>ref-1</AcctSvcrRef>"));
+        assert!(raw_entry.ends_with("</Ntry>"));
     }
 
     #[test]
@@ -529,6 +550,26 @@ mod tests {
             report.entries[0].transactions[0].original_amount,
             Some(Decimal::new(77, 2))
         );
+    }
+
+    #[test]
+    fn preserves_raw_entry_with_multiple_transaction_details() {
+        let xml = br#"<Document><BkToCstmrAcctRpt><Rpt><Acct><Ccy>EUR</Ccy></Acct>
+            <Ntry><Amt Ccy="EUR">3.00</Amt><CdtDbtInd>DBIT</CdtDbtInd>
+              <Sts><Cd>BOOK</Cd></Sts><BookgDt><Dt>2026-07-26</Dt></BookgDt>
+              <AcctSvcrRef>batch-1</AcctSvcrRef><NtryDtls>
+                <TxDtls><Amt Ccy="EUR">1.00</Amt><CdtDbtInd>DBIT</CdtDbtInd>
+                  <RmtInf><Ustrd>First</Ustrd></RmtInf></TxDtls>
+                <TxDtls><Amt Ccy="EUR">2.00</Amt><CdtDbtInd>DBIT</CdtDbtInd>
+                  <RmtInf><Ustrd>Second</Ustrd></RmtInf></TxDtls>
+              </NtryDtls>
+            </Ntry></Rpt></BkToCstmrAcctRpt></Document>"#;
+
+        let report = parse_report(xml, false).unwrap();
+        assert_eq!(report.entries[0].transactions.len(), 2);
+        let raw_entry = report.entries[0].raw_xml.as_deref().unwrap();
+        assert!(raw_entry.contains("<Ustrd>First</Ustrd>"));
+        assert!(raw_entry.contains("<Ustrd>Second</Ustrd>"));
     }
 
     #[test]
